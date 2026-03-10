@@ -1,0 +1,84 @@
+assign_measurement:
+  name: Assign measurement
+  description: Manually assign a pending weight measurement to a specific user when automatic routing is ambiguous.
+  fields:
+    device_id:
+      name: Scale
+      description: The scale router device.
+      required: true
+      selector:
+        device:
+          integration: multi_user_scale_router
+    measurement_id:
+      name: Measurement ID
+      description: The measurement ID of the pending measurement to assign (shown in the notification).
+      required: true
+      example: "e7e7be2c9bfe4e6fb66bf713bbcb0c74"
+      selector:
+        text:
+    user_id:
+      name: User ID
+      description: The unique ID of the user to assign the measurement to.
+      required: true
+      example: "alice"
+      selector:
+        text:
+
+reassign_measurement:
+  name: Reassign measurement
+  description: Reassign a user's measurement to a different user. If no measurement ID is provided, the newest measurement is reassigned.
+  fields:
+    device_id:
+      name: Scale
+      description: The scale router device.
+      required: true
+      selector:
+        device:
+          integration: multi_user_scale_router
+    from_user_id:
+      name: From User ID
+      description: The unique ID of the user to take the measurement from.
+      required: true
+      example: "alice"
+      selector:
+        text:
+    to_user_id:
+      name: To User ID
+      description: The unique ID of the user to assign the measurement to.
+      required: true
+      example: "bob"
+      selector:
+        text:
+    measurement_id:
+      name: Measurement ID
+      description: The measurement ID of the specific measurement to reassign. If omitted, the most recent measurement will be used.
+      required: false
+      example: "e7e7be2c9bfe4e6fb66bf713bbcb0c74"
+      selector:
+        text:
+
+remove_measurement:
+  name: Remove measurement
+  description: Remove a measurement from a user's history. By default removes the newest measurement, or specify a measurement ID to remove a specific measurement.
+  fields:
+    device_id:
+      name: Scale
+      description: The scale router device.
+      required: true
+      selector:
+        device:
+          integration: multi_user_scale_router
+    user_id:
+      name: User ID
+      description: The unique ID of the user to remove the measurement from.
+      required: true
+      example: "alice"
+      selector:
+        text:
+    measurement_id:
+      name: Measurement ID
+      description: The measurement ID of the specific measurement to remove. If not provided, removes the newest measurement.
+      required: false
+      example: "e7e7be2c9bfe4e6fb66bf713bbcb0c74"
+      selector:
+        text:

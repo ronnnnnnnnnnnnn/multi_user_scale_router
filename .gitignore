@@ -1,0 +1,42 @@
+# Bytecode and Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tests and coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+tests/
+
+# Lint/type-check caches
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.pyre/
+.pytype/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Local IDE/editor artifacts
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Miscellaneous local tooling folders
+.tox/
+.nox/

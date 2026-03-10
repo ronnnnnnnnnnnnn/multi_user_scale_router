@@ -1,0 +1,151 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Multi-User Scale Router",
+        "description": "Choose the source weight sensor and detection settings.",
+        "data": {
+          "source_entity_id": "Source Weight Sensor",
+          "history_retention_days": "History Retention (days)",
+          "max_history_size": "Max History Size (measurements)"
+        }
+      },
+      "add_first_user": {
+        "title": "Add User Profile",
+        "description": "Add a user profile to this router. Enable the toggle below if you want to keep adding users after saving this one.",
+        "data": {
+          "user_name": "User Name",
+          "person_entity": "Person Entity (optional)",
+          "mobile_notify_services": "Mobile Devices for Actionable Notifications (optional)",
+          "add_another_user": "Add another user after saving"
+        }
+      }
+    },
+    "error": {
+      "empty_user_name": "Enter a valid user name.",
+      "duplicate_person_entity": "That person is already linked to another user.",
+      "no_sensor_entities": "No sensor entities were found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Multi-User Scale Router",
+        "menu_options": {
+          "add_user": "Add User Profile",
+          "edit_user": "Edit User Profile",
+          "remove_user": "Remove User Profile",
+          "router_settings": "Detection Settings"
+        }
+      },
+      "add_user": {
+        "title": "Add User Profile",
+        "description": "Add another user profile to this router.",
+        "data": {
+          "user_name": "User Name",
+          "person_entity": "Person Entity (optional)",
+          "mobile_notify_services": "Mobile Devices for Actionable Notifications (optional)"
+        }
+      },
+      "edit_user": {
+        "title": "Edit User",
+        "description": "Choose a user profile to edit.",
+        "data": {
+          "user_id": "User to Edit"
+        }
+      },
+      "edit_user_details": {
+        "title": "Edit User",
+        "description": "Update the selected user profile.",
+        "data": {
+          "user_name": "User Name",
+          "person_entity": "Person Entity (optional)",
+          "mobile_notify_services": "Mobile Devices for Actionable Notifications (optional)"
+        }
+      },
+      "remove_user": {
+        "title": "Remove User",
+        "description": "Select a user profile to remove. This also deletes that user's routed measurement history.",
+        "data": {
+          "user_id": "User to Remove"
+        }
+      },
+      "router_settings": {
+        "title": "Detection Settings",
+        "description": "Update the source sensor and detection settings.",
+        "data": {
+          "source_entity_id": "Source Weight Sensor",
+          "history_retention_days": "History Retention (days)",
+          "max_history_size": "Max History Size (measurements)"
+        }
+      }
+    },
+    "abort": {
+      "cannot_remove_last_user": "At least one user must remain configured."
+    },
+    "error": {
+      "empty_user_name": "Enter a valid user name.",
+      "duplicate_person_entity": "That person is already linked to another user."
+    }
+  },
+  "services": {
+    "assign_measurement": {
+      "name": "Assign measurement",
+      "description": "Manually assign a pending weight measurement to a specific user when automatic routing is ambiguous.",
+      "fields": {
+        "device_id": {
+          "name": "Scale Router Device",
+          "description": "The Multi-User Scale Router device."
+        },
+        "measurement_id": {
+          "name": "Measurement ID",
+          "description": "The measurement ID of the pending measurement to assign (shown in the notification)."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "The unique ID of the user to assign the measurement to."
+        }
+      }
+    },
+    "reassign_measurement": {
+      "name": "Reassign measurement",
+      "description": "Reassign a user's measurement to a different user. If no measurement ID is provided, the newest measurement is reassigned.",
+      "fields": {
+        "device_id": {
+          "name": "Scale Router Device",
+          "description": "The Multi-User Scale Router device."
+        },
+        "from_user_id": {
+          "name": "From User ID",
+          "description": "The unique ID of the user to take the measurement from."
+        },
+        "to_user_id": {
+          "name": "To User ID",
+          "description": "The unique ID of the user to assign the measurement to."
+        },
+        "measurement_id": {
+          "name": "Measurement ID",
+          "description": "The measurement ID of the specific measurement to reassign. If omitted, the most recent measurement will be used."
+        }
+      }
+    },
+    "remove_measurement": {
+      "name": "Remove measurement",
+      "description": "Remove a measurement from a user's history. By default removes the newest measurement, or specify a measurement ID to remove a specific measurement.",
+      "fields": {
+        "device_id": {
+          "name": "Scale Router Device",
+          "description": "The Multi-User Scale Router device."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "The unique ID of the user to remove the measurement from."
+        },
+        "measurement_id": {
+          "name": "Measurement ID",
+          "description": "The measurement ID of the specific measurement to remove. If not provided, removes the newest measurement."
+        }
+      }
+    }
+  }
+}
