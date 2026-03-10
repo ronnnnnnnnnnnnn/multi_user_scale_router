@@ -130,9 +130,7 @@ def _source_sensor_options(hass) -> list[selector.SelectOptionDict]:
             continue
         label = state.attributes.get("friendly_name") or state.entity_id
         option = selector.SelectOptionDict(value=state.entity_id, label=str(label))
-        options.append(
-            (_source_sensor_relevance_score(state), option)
-        )
+        options.append((_source_sensor_relevance_score(state), option))
     options.sort(
         key=lambda option_with_score: (
             -option_with_score[0],
@@ -163,15 +161,20 @@ def _has_numeric_metadata(state) -> bool:
 
     unit = str(state.attributes.get(ATTR_UNIT_OF_MEASUREMENT, "")).lower().strip()
     state_class = str(state.attributes.get("state_class", "")).lower().strip()
-    return bool(unit) and unit in {
-        "kg",
-        "kilogram",
-        "kilograms",
-        "lb",
-        "lbs",
-        "pound",
-        "pounds",
-    } and state_class == "measurement"
+    return (
+        bool(unit)
+        and unit
+        in {
+            "kg",
+            "kilogram",
+            "kilograms",
+            "lb",
+            "lbs",
+            "pound",
+            "pounds",
+        }
+        and state_class == "measurement"
+    )
 
 
 def _is_supported_weight_sensor(state) -> bool:
@@ -196,7 +199,7 @@ def _source_sensor_relevance_score(state) -> int:
     if "scale" in name:
         score += 20
     if "mass" in name:
-        score -= 10    
+        score -= 10
     if any(term in name for term in {"fat", "muscle", "bone", "water", "impedance"}):
         score -= 25
 
@@ -248,6 +251,8 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
+            await self.async_set_unique_id(user_input[CONF_SOURCE_ENTITY_ID])
+            self._abort_if_unique_id_configured()
             self.context.update(
                 {
                     CONF_SOURCE_ENTITY_ID: user_input[CONF_SOURCE_ENTITY_ID],
@@ -261,10 +266,7 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_add_first_user()
 
         if not _source_sensor_options(self.hass):
-            return self.async_show_form(
-                step_id="user",
-                errors={"base": "no_sensor_entities"},
-            )
+            return self.async_abort(reason="no_sensor_entities")
 
         return self.async_show_form(
             step_id="user",
@@ -371,10 +373,14 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> vol.Schema:
         defaults = user_input or {}
+        configured_users = list(self.context.get("users", []))
+        default_name = (
+            defaults.get(CONF_USER_NAME) or f"User {len(configured_users) + 1}"
+        )
         schema: dict[Any, Any] = {
             vol.Required(
                 CONF_USER_NAME,
-                default=defaults.get(CONF_USER_NAME, "User 1"),
+                default=default_name,
             ): cv.string,
         }
         if defaults.get(CONF_PERSON_ENTITY):

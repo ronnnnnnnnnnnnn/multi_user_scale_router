@@ -21,10 +21,13 @@
         }
       }
     },
+    "abort": {
+      "already_configured": "A router for this sensor is already configured.",
+      "no_sensor_entities": "No weight sensor entities were found. Please set up your scale first, then add the Multi-User Scale Router."
+    },
     "error": {
       "empty_user_name": "Enter a valid user name.",
-      "duplicate_person_entity": "That person is already linked to another user.",
-      "no_sensor_entities": "No sensor entities were found."
+      "duplicate_person_entity": "That person is already linked to another user."
     }
   },
   "options": {

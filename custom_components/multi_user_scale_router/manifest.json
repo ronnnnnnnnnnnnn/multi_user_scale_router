@@ -1,14 +1,14 @@
 {
   "domain": "multi_user_scale_router",
   "name": "Multi-User Scale Router",
-  "version": "0.1.0",
-  "documentation": "https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router",
-  "issue_tracker": "https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router/issues",
   "codeowners": [
     "@ronnnnnnnnnnnnn"
   ],
   "config_flow": true,
+  "documentation": "https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router",
   "integration_type": "service",
-  "iot_class": "local_push",
-  "requirements": ["multi-user-scale-core>=0.1.0"]
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router/issues",
+  "requirements": ["multi-user-scale-core==0.1.1"],
+  "version": "0.1.0"
 }

@@ -5,7 +5,6 @@ from __future__ import annotations
 DOMAIN = "multi_user_scale_router"
 
 CONF_SOURCE_ENTITY_ID = "source_entity_id"
-CONF_USER_NAMES = "user_names"
 CONF_PERSON_ENTITY = "person_entity"
 CONF_MOBILE_NOTIFY_SERVICES = "mobile_notify_services"
 CONF_HISTORY_RETENTION_DAYS = "history_retention_days"

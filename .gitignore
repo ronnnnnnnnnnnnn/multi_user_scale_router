@@ -40,3 +40,6 @@ env/
 # Miscellaneous local tooling folders
 .tox/
 .nox/
+
+# Claude Code session state
+.claude/

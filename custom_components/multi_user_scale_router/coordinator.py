@@ -378,7 +378,7 @@ class RouterRuntime:
         self._unsub_state = async_track_state_change_event(
             self.hass,
             self.source_entity_id,
-            self._handle_source_update,
+            self._async_handle_source_update,
         )
 
     def async_unload(self) -> None:
@@ -712,7 +712,6 @@ class RouterRuntime:
             action_data: dict[str, Any]
 
             if len(users) == 1:
-                _, user_name = users[0]
                 user_id, user_name = users[0]
                 shared_user_names: list[str] = []
                 for user in self.users:
@@ -772,7 +771,7 @@ class RouterRuntime:
                     {
                         "action": (
                             f"{action_prefix}"
-                            f"{action_entry}_{action_measurement}_{action_user}"
+                            f"{action_entry}|{action_measurement}|{action_user}"
                         ),
                         "title": assign_title,
                     }
@@ -782,7 +781,7 @@ class RouterRuntime:
                         {
                             "action": (
                                 f"{action_not_me_prefix}"
-                                f"{action_entry}_{action_measurement}_{action_user}"
+                                f"{action_entry}|{action_measurement}|{action_user}"
                             ),
                             "title": not_me_title,
                         }
@@ -792,7 +791,7 @@ class RouterRuntime:
                         {
                             "action": (
                                 f"{action_not_me_prefix}"
-                                f"{action_entry}_{action_measurement}_{action_user}"
+                                f"{action_entry}|{action_measurement}|{action_user}"
                             ),
                             "title": f"Not {user_name}",
                         }
@@ -802,7 +801,7 @@ class RouterRuntime:
                         {
                             "action": (
                                 f"{action_not_me_prefix}"
-                                f"{action_entry}_{action_measurement}_{action_user}"
+                                f"{action_entry}|{action_measurement}|{action_user}"
                             ),
                             "title": "Not Me",
                         }
@@ -1023,9 +1022,6 @@ class RouterRuntime:
         self._notify()
         self._notify_diagnostic_sensors()
         return removed
-
-    def _handle_source_update(self, event: Event) -> None:
-        self.hass.add_job(self._async_handle_source_update, event)
 
     @callback
     def _async_handle_source_update(self, event: Event) -> None:

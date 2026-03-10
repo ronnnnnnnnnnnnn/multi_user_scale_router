@@ -59,7 +59,7 @@ class RouterUserWeightSensor(SensorEntity):
         display_unit = self._runtime.display_unit
         is_pounds = display_unit == "lb"
         weight_history = []
-        for measurement in history:
+        for measurement in history[-20:]:
             display_measurement = {
                 "Timestamp": measurement.timestamp.isoformat(),
             }
@@ -69,9 +69,6 @@ class RouterUserWeightSensor(SensorEntity):
                 )
             else:
                 display_measurement["Weight (kg)"] = round(measurement.weight_kg, 2)
-            impedance = measurement.raw.get("impedance_ohm")
-            if impedance is not None:
-                display_measurement["Impedance (Ω)"] = impedance
             weight_history.append(display_measurement)
 
         return {"weight_history": weight_history}

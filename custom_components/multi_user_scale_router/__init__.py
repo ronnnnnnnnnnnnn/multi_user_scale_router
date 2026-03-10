@@ -59,6 +59,25 @@ REMOVE_SCHEMA = vol.Schema(
 )
 
 
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old config entry to a newer schema version."""
+    _LOGGER.debug("Migrating config entry from version %s", config_entry.version)
+
+    if config_entry.version == 1:
+        # Current version — nothing to migrate.
+        return True
+
+    # Future migrations go here, e.g.:
+    #   if config_entry.version == 1:
+    #       new_data = {**config_entry.data, "new_field": default_value}
+    #       hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
+
+    _LOGGER.error(
+        "Cannot migrate config entry from unknown version %s", config_entry.version
+    )
+    return False
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime = RouterRuntime(hass, entry)
     runtime.async_setup()
@@ -78,16 +97,21 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if data:
         data.async_unload()
         hass.data[DOMAIN].pop(entry.entry_id, None)
-    if not hass.data.get(DOMAIN):
-        router_data = hass.data.get(DOMAIN, {})
+
+    remaining_runtimes = [
+        v for v in hass.data.get(DOMAIN, {}).values() if isinstance(v, RouterRuntime)
+    ]
+    if not remaining_runtimes:
+        domain_data = hass.data.get(DOMAIN, {})
         for service in (
             SERVICE_ASSIGN_MEASUREMENT,
             SERVICE_REASSIGN_MEASUREMENT,
             SERVICE_REMOVE_MEASUREMENT,
         ):
             hass.services.async_remove(DOMAIN, service)
-        if unsub := router_data.pop(DATA_MOBILE_APP_LISTENER_UNSUB, None):
+        if unsub := domain_data.pop(DATA_MOBILE_APP_LISTENER_UNSUB, None):
             unsub()
+
     await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     return True
 
@@ -191,8 +215,6 @@ def _register_mobile_action_listener(hass: HomeAssistant) -> None:
             decoded = _decode_router_not_me_action(action)
             if decoded is None:
                 return
-        if not decoded:
-            return
 
         entry_id, measurement_id, user_id = decoded
         runtime = hass.data.get(DATA_ROUTER, {}).get(entry_id)
