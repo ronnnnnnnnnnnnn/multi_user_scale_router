@@ -25,11 +25,15 @@ This custom integration automatically routes weight measurements from any connec
 
 ### HACS (Recommended)
 
+> **Note:** This integration is not yet in the HACS default store. You must add it as a custom repository first (see below), or use the button which does this automatically.
+
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ronnnnnnnnnnnnn&repository=multi_user_scale_router&category=integration)
 
 1. Ensure that [HACS](https://hacs.xyz/) is installed in your Home Assistant instance.
-2. In the HACS panel, search for "Multi-User Scale Router".
-3. Click "Download" on the Multi-User Scale Router integration.
+2. Click the button above, **or** add this repository manually:
+   - In HACS, go to **Integrations** → click the three-dot menu (⋮) → **Custom repositories**
+   - Enter `https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router` and select **Integration** as the category
+3. Search for "Multi-User Scale Router" in HACS and click **Download**.
 4. Restart Home Assistant.
 
 ### Manual Installation
