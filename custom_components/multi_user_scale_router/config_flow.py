@@ -396,10 +396,16 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         available_mobile_services = _get_mobile_notify_services(self.hass)
         if available_mobile_services:
+            # Drop saved services that are no longer registered — otherwise
+            # voluptuous rejects the form on render and the user is stuck.
+            saved_services = defaults.get(CONF_MOBILE_NOTIFY_SERVICES) or []
+            valid_default = [
+                s for s in saved_services if s in available_mobile_services
+            ]
             schema[
                 vol.Optional(
                     CONF_MOBILE_NOTIFY_SERVICES,
-                    default=defaults.get(CONF_MOBILE_NOTIFY_SERVICES, []),
+                    default=valid_default,
                 )
             ] = cv.multi_select(available_mobile_services)
         schema[
@@ -627,10 +633,16 @@ class ScaleRouterOptionsFlow(OptionsFlow):
             )
         available_mobile_services = _get_mobile_notify_services(self.hass)
         if available_mobile_services:
+            # Drop saved services that are no longer registered — otherwise
+            # voluptuous rejects the form on render and the user is stuck.
+            saved_services = defaults.get(CONF_MOBILE_NOTIFY_SERVICES) or []
+            valid_default = [
+                s for s in saved_services if s in available_mobile_services
+            ]
             schema[
                 vol.Optional(
                     CONF_MOBILE_NOTIFY_SERVICES,
-                    default=defaults.get(CONF_MOBILE_NOTIFY_SERVICES, []),
+                    default=valid_default,
                 )
             ] = cv.multi_select(available_mobile_services)
         return vol.Schema(schema)

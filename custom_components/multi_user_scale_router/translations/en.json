@@ -1,4 +1,34 @@
 {
+  "issues": {
+    "person_entity_missing": {
+      "title": "{user_name}: linked person entity no longer exists",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Clear the broken person entity link?",
+            "description": "Person entity `{person_entity}` linked to **{user_name}** no longer exists. Auto-assignment still works — the location filter ignores broken links and falls back to weight-only matching — but the configured location signal isn't doing anything.\n\nThis will clear the link from the profile. You can link to a different person entity later from **Configure** if you want.",
+            "submit": "Clear"
+          }
+        }
+      }
+    },
+    "person_entity_unknown": {
+      "title": "{user_name}: linked person has no location",
+      "description": "User **{user_name}** is linked to person entity `{person_entity}`, but that person has no working device trackers, so its state is `unknown`. Auto-assignment continues using weight matching — the link doesn't actively cause a problem — but location-based filtering for this user is effectively disabled until a tracker is assigned.\n\nFix it by either:\n\n- Going to **Settings → People**, opening `{person_entity}`, and assigning a device tracker to it (typically the user's phone via the Home Assistant companion app), **or**\n- Going to **Settings → Devices & Services → Multi-User Scale Router → Configure** and clearing the **Person Entity** field on this user's profile if you don't plan to set up a tracker."
+    },
+    "mobile_service_missing": {
+      "title": "{user_name}: mobile notify service `{service}` not found",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Remove stale notification target?",
+            "description": "Home Assistant doesn't know about the notify service `{service}` that's configured for **{user_name}**. Actionable notifications sent to it are being silently dropped — usually because the companion app was removed from the phone or the device was renamed.\n\nThis will remove `{service}` from the profile. The integration will reload so the change takes effect immediately. You can re-add a notification target later from **Configure** if needed.",
+            "submit": "Remove"
+          }
+        }
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

@@ -26,6 +26,10 @@ from .const import (
     SERVICE_REMOVE_MEASUREMENT,
 )
 from .coordinator import RouterRuntime
+from .repairs import (
+    async_clear_repair_issues_for_entry,
+    async_scan_repair_issues,
+)
 
 PLATFORMS = ["sensor"]
 _LOGGER = logging.getLogger(__name__)
@@ -89,10 +93,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     _register_services(hass)
+
+    # Reconcile Settings → Repairs issues for this entry's profiles.
+    # Runs again on options-flow reload because that re-enters setup.
+    async_scan_repair_issues(hass, entry)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    async_clear_repair_issues_for_entry(hass, entry)
+
     data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if data:
         data.async_unload()
