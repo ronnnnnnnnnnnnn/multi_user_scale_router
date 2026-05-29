@@ -82,3 +82,28 @@ remove_measurement:
       example: "e7e7be2c9bfe4e6fb66bf713bbcb0c74"
       selector:
         text:
+
+import_history:
+  name: Import history
+  description: Import accepted historical measurements for a user.
+  fields:
+    device_id:
+      name: Scale
+      description: The scale router device.
+      required: true
+      selector:
+        device:
+          integration: multi_user_scale_router
+    user_id:
+      name: User ID
+      description: The unique ID of the user to import measurements for.
+      required: true
+      example: "alice"
+      selector:
+        text:
+    measurements:
+      name: Measurements
+      description: List of measurements with timestamp, weight_kg, and optional measurement_id/source_id/source_unit.
+      required: true
+      selector:
+        object:

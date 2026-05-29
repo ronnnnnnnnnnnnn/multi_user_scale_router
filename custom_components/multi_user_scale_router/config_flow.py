@@ -359,7 +359,7 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_HISTORY_RETENTION_DAYS,
                         DEFAULT_HISTORY_RETENTION_DAYS,
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Required(
                     CONF_MAX_HISTORY_SIZE,
                     default=defaults.get(
@@ -673,7 +673,7 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                         CONF_HISTORY_RETENTION_DAYS,
                         DEFAULT_HISTORY_RETENTION_DAYS,
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Required(
                     CONF_MAX_HISTORY_SIZE,
                     default=defaults.get(

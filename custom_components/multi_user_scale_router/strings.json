@@ -179,6 +179,24 @@
           "description": "The measurement ID of the specific measurement to remove. If not provided, removes the newest measurement."
         }
       }
+    },
+    "import_history": {
+      "name": "Import history",
+      "description": "Import accepted historical measurements for a user.",
+      "fields": {
+        "device_id": {
+          "name": "Scale Router Device",
+          "description": "The Multi-User Scale Router device."
+        },
+        "user_id": {
+          "name": "User ID",
+          "description": "The unique ID of the user to import measurements for."
+        },
+        "measurements": {
+          "name": "Measurements",
+          "description": "List of measurements with timestamp, weight_kg, and optional measurement_id, source_id, and source_unit."
+        }
+      }
     }
   }
 }

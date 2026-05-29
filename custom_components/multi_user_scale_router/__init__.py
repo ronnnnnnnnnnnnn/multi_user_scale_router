@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+from datetime import datetime, timezone
 from urllib.parse import unquote
 
 import voluptuous as vol
@@ -11,10 +13,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DEVICE_ID,
     CONF_FROM_USER_ID,
+    CONF_MEASUREMENTS,
     CONF_MEASUREMENT_ID,
     CONF_TO_USER_ID,
     CONF_USER_ID,
@@ -22,6 +26,7 @@ from .const import (
     DATA_MOBILE_APP_LISTENER_UNSUB,
     DOMAIN,
     SERVICE_ASSIGN_MEASUREMENT,
+    SERVICE_IMPORT_HISTORY,
     SERVICE_REASSIGN_MEASUREMENT,
     SERVICE_REMOVE_MEASUREMENT,
 )
@@ -30,6 +35,7 @@ from .repairs import (
     async_clear_repair_issues_for_entry,
     async_scan_repair_issues,
 )
+from multi_user_scale_core import DuplicateMeasurementError, WeightMeasurement
 
 PLATFORMS = ["sensor"]
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +65,25 @@ REMOVE_SCHEMA = vol.Schema(
         vol.Required(CONF_DEVICE_ID): cv.string,
         vol.Required(CONF_USER_ID): cv.string,
         vol.Optional(CONF_MEASUREMENT_ID): cv.string,
+    }
+)
+
+IMPORT_HISTORY_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_DEVICE_ID): cv.string,
+        vol.Required(CONF_USER_ID): cv.string,
+        vol.Required(CONF_MEASUREMENTS): vol.All(
+            [
+                {
+                    vol.Required("weight_kg"): vol.Coerce(float),
+                    vol.Required("timestamp"): cv.string,
+                    vol.Optional(CONF_MEASUREMENT_ID): cv.string,
+                    vol.Optional("source_id", default="history_import"): cv.string,
+                    vol.Optional("source_unit", default="kg"): cv.string,
+                }
+            ],
+            vol.Length(min=1),
+        ),
     }
 )
 
@@ -117,6 +142,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_ASSIGN_MEASUREMENT,
             SERVICE_REASSIGN_MEASUREMENT,
             SERVICE_REMOVE_MEASUREMENT,
+            SERVICE_IMPORT_HISTORY,
         ):
             hass.services.async_remove(DOMAIN, service)
         if unsub := domain_data.pop(DATA_MOBILE_APP_LISTENER_UNSUB, None):
@@ -297,8 +323,6 @@ def _register_mobile_action_listener(hass: HomeAssistant) -> None:
 
 def _register_services(hass: HomeAssistant) -> None:
     _register_mobile_action_listener(hass)
-    if hass.services.has_service(DOMAIN, SERVICE_ASSIGN_MEASUREMENT):
-        return
 
     async def handle_assign(call: ServiceCall) -> None:
         runtime = _get_runtime_for_call(hass, call)
@@ -373,21 +397,103 @@ def _register_services(hass: HomeAssistant) -> None:
         except Exception as error:
             raise HomeAssistantError(str(error)) from error
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ASSIGN_MEASUREMENT,
-        handle_assign,
-        schema=ASSIGN_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REASSIGN_MEASUREMENT,
-        handle_reassign,
-        schema=REASSIGN_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REMOVE_MEASUREMENT,
-        handle_remove,
-        schema=REMOVE_SCHEMA,
-    )
+    async def handle_import_history(call: ServiceCall) -> None:
+        runtime = _get_runtime_for_call(hass, call)
+        user_id = call.data[CONF_USER_ID]
+        valid_user_ids = {user.user_id for user in runtime.users}
+        if user_id not in valid_user_ids:
+            raise HomeAssistantError(
+                f"Unknown user_id '{user_id}'. Valid users: {_format_user_choices(runtime)}"
+            )
+
+        imported = 0
+        skipped_duplicates = 0
+        measurements: list[WeightMeasurement] = []
+        for item in call.data[CONF_MEASUREMENTS]:
+            weight_kg = item["weight_kg"]
+            if not math.isfinite(weight_kg):
+                raise HomeAssistantError(
+                    "Imported measurement weight_kg must be a finite number"
+                )
+
+            timestamp = dt_util.parse_datetime(item["timestamp"])
+            if timestamp is None:
+                raise HomeAssistantError(
+                    f"Invalid timestamp '{item['timestamp']}' for imported measurement"
+                )
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise HomeAssistantError(
+                    "Imported measurement timestamp must include a timezone offset"
+                )
+            timestamp = dt_util.as_utc(timestamp)
+            if timestamp > datetime.now(timezone.utc):
+                raise HomeAssistantError(
+                    "Imported measurement timestamp must not be in the future"
+                )
+
+            measurement_id = item.get(CONF_MEASUREMENT_ID)
+            if measurement_id is None:
+                measurement_id = (
+                    f"import_{user_id}_{item['timestamp']}_{item['weight_kg']}".replace(
+                        ":", ""
+                    ).replace("+", "p")
+                )
+            measurements.append(
+                WeightMeasurement(
+                    weight_kg=weight_kg,
+                    timestamp=timestamp,
+                    source_id=item.get("source_id", "history_import"),
+                    measurement_id=measurement_id,
+                    source_unit=item.get("source_unit", "kg"),
+                    raw={"imported_by": SERVICE_IMPORT_HISTORY},
+                )
+            )
+
+        measurements.sort(key=lambda measurement: measurement.timestamp)
+        for measurement in measurements:
+            try:
+                runtime.record_measurement_for_user(user_id, measurement)
+                imported += 1
+            except DuplicateMeasurementError:
+                skipped_duplicates += 1
+                continue
+            except Exception as error:
+                raise HomeAssistantError(str(error)) from error
+
+        runtime._notify()
+        runtime._notify_diagnostic_sensors()
+        _LOGGER.info(
+            "Imported %s historical measurements for %s, skipped %s duplicates",
+            imported,
+            user_id,
+            skipped_duplicates,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_ASSIGN_MEASUREMENT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_ASSIGN_MEASUREMENT,
+            handle_assign,
+            schema=ASSIGN_SCHEMA,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_REASSIGN_MEASUREMENT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_REASSIGN_MEASUREMENT,
+            handle_reassign,
+            schema=REASSIGN_SCHEMA,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_REMOVE_MEASUREMENT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_REMOVE_MEASUREMENT,
+            handle_remove,
+            schema=REMOVE_SCHEMA,
+        )
+    if not hass.services.has_service(DOMAIN, SERVICE_IMPORT_HISTORY):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_IMPORT_HISTORY,
+            handle_import_history,
+            schema=IMPORT_HISTORY_SCHEMA,
+        )

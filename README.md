@@ -135,6 +135,32 @@ data:
   measurement_id: "abc123def456"  # optional; omit to remove the most recent
 ```
 
+### `multi_user_scale_router.import_history`
+
+Import accepted historical measurements for one user. Use this when migrating
+known-good history from another tracker so the router can immediately compare
+new readings against the user's existing trend.
+
+Each imported item needs `weight_kg` and an ISO timestamp with a timezone
+offset. `measurement_id`, `source_id`, and `source_unit` are optional; omitted
+measurement IDs are derived from the user, timestamp, and weight. Existing
+measurement IDs are skipped so the service can be safely re-run with the same
+import payload. Import payloads can be in any order; the service records them
+chronologically.
+
+**Example:**
+```yaml
+action: multi_user_scale_router.import_history
+data:
+  device_id: <your_scale_router_device_id>
+  user_id: "jane"
+  measurements:
+    - weight_kg: 64.2
+      timestamp: "2026-05-14T07:30:00+00:00"
+      measurement_id: "jane_2026_05_14"
+      source_id: "migration"
+```
+
 ## Diagnostic Sensors
 
 The integration creates two diagnostic sensors to provide visibility into its state:
