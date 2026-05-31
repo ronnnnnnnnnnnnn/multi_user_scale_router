@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -21,11 +21,13 @@ def _weight_to_display(value: float | None) -> float | None:
 
 
 class RouterUserWeightSensor(SensorEntity):
-    """Sensor that exposes the latest assigned weight for a user."""
+    """Sensor that exposes the user's latest weight measurement."""
 
     _attr_device_class = SensorDeviceClass.WEIGHT
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_should_poll = False
     _attr_has_entity_name = True
+    _attr_force_update = True
 
     def __init__(self, runtime: Any, user_id: str, display_name: str) -> None:
         self._runtime = runtime
@@ -61,17 +63,26 @@ class RouterUserWeightSensor(SensorEntity):
         weight_history = []
         for measurement in history[-20:]:
             display_measurement = {
-                "Timestamp": measurement.timestamp.isoformat(),
+                "measurement_id": measurement.measurement_id,
+                "timestamp": measurement.timestamp.isoformat(),
+                "weight": round(
+                    self._runtime.display_weight_value(measurement.weight_kg)
+                    if is_pounds
+                    else measurement.weight_kg,
+                    2,
+                ),
+                "weight_unit": display_unit,
             }
-            if is_pounds:
-                display_measurement["Weight (lbs)"] = round(
-                    self._runtime.display_weight_value(measurement.weight_kg), 2
-                )
-            else:
-                display_measurement["Weight (kg)"] = round(measurement.weight_kg, 2)
             weight_history.append(display_measurement)
 
-        return {"weight_history": weight_history}
+        attrs = {"weight_history": weight_history}
+        
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is not None:
+            attrs["measurement_id"] = measurement.measurement_id
+            attrs["source_entity_id"] = self._runtime.source_entity_id
+            
+        return attrs
 
     async def async_will_remove_from_hass(self) -> None:
         self._runtime.remove_listener(self.async_write_ha_state)
@@ -84,6 +95,7 @@ class RouterPendingSensor(SensorEntity):
     _attr_should_poll = False
     _attr_has_entity_name = True
     _attr_name = "Pending Measurements"
+    _attr_icon = "mdi:clipboard-list"
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
@@ -104,26 +116,21 @@ class RouterPendingSensor(SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         pending = [
             {
-                "measurement_id": pending.measurement.measurement_id,
-                "Timestamp": pending.measurement.timestamp.isoformat(),
-                **(
-                    {
-                        "Weight (lbs)": round(
-                            self._runtime.display_weight_value(
-                                pending.measurement.weight_kg
-                            ),
-                            2,
-                        )
-                    }
+                "measurement_id": pending_item.measurement.measurement_id,
+                "timestamp": pending_item.measurement.timestamp.isoformat(),
+                "weight": round(
+                    self._runtime.display_weight_value(
+                        pending_item.measurement.weight_kg
+                    )
                     if self._runtime.display_unit == "lb"
-                    else {
-                        "Weight (kg)": round(pending.measurement.weight_kg, 2),
-                    }
+                    else pending_item.measurement.weight_kg,
+                    2,
                 ),
+                "weight_unit": self._runtime.display_unit,
             }
-            for pending in self._runtime.pending_measurements
+            for pending_item in self._runtime.pending_measurements
         ]
-        pending.sort(key=lambda pending_item: pending_item["Timestamp"], reverse=True)
+        pending.sort(key=lambda x: x["timestamp"], reverse=True)
         return {
             "pending": pending,
         }
@@ -139,6 +146,7 @@ class RouterUsersSensor(SensorEntity):
     _attr_should_poll = False
     _attr_has_entity_name = True
     _attr_name = "User Directory"
+    _attr_icon = "mdi:account-multiple"
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
@@ -171,6 +179,179 @@ class RouterUsersSensor(SensorEntity):
         self._runtime.remove_listener(self.async_write_ha_state)
 
 
+class RouterUserTrackedEntitySensor(SensorEntity):
+    """Sensor that exposes a tracked entity for a user."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = True
+    _attr_force_update = True
+
+    def __init__(self, runtime: Any, user_id: str, display_name: str, source_entity_id: str) -> None:
+        self._runtime = runtime
+        self._user_id = user_id
+        self._source_entity_id = source_entity_id
+        
+        state = runtime.hass.states.get(source_entity_id)
+        
+        name = source_entity_id.split(".")[-1].replace("_", " ").title()
+        
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(runtime.hass)
+        registry_entry = registry.async_get(source_entity_id)
+        if registry_entry:
+            name = registry_entry.name or registry_entry.original_name or name
+            self._attr_device_class = registry_entry.device_class or registry_entry.original_device_class
+            self._attr_native_unit_of_measurement = registry_entry.unit_of_measurement
+            self._attr_icon = registry_entry.icon or registry_entry.original_icon
+            
+        if state:
+            name = state.attributes.get("friendly_name", name)
+            self._attr_native_unit_of_measurement = state.attributes.get("unit_of_measurement", getattr(self, "_attr_native_unit_of_measurement", None))
+            self._attr_device_class = state.attributes.get("device_class", getattr(self, "_attr_device_class", None))
+            self._attr_state_class = state.attributes.get("state_class")
+            self._attr_icon = state.attributes.get("icon", getattr(self, "_attr_icon", None))
+
+        # Fallback to prevent device_class/unit mismatch warnings on startup if unit is missing
+        if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT and not getattr(self, "_attr_native_unit_of_measurement", None):
+            self._attr_native_unit_of_measurement = "kg"
+
+        # state_class is not stored in the entity registry, so if the source entity
+        # hasn't loaded yet we'd lose it. Tracked entities from a scale are always numeric
+        # measurements, so we can safely default to MEASUREMENT to prevent
+        # "entity no longer has a state class" repair warnings on startup.
+        if not getattr(self, "_attr_state_class", None):
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+
+        self._attr_name = f"{display_name}'s {name}"
+        self._attr_unique_id = f"{runtime.entry_id}_{user_id}_{source_entity_id.replace('.', '_')}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, runtime.entry_id)},
+            name=runtime.title,
+            manufacturer="Multi-User Scale Router",
+            model="Multi-User Router",
+        )
+        runtime.add_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self) -> str | float | None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None:
+            return None
+        tracked = measurement.raw.get("tracked_entities")
+        if not tracked or not isinstance(tracked, dict):
+            return None
+        entity_data = tracked.get(self._source_entity_id)
+        if not entity_data or not isinstance(entity_data, dict):
+            return None
+        return entity_data.get("state")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None:
+            return None
+        return {
+            "measurement_id": measurement.measurement_id,
+            "source_entity_id": self._source_entity_id,
+        }
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._runtime.remove_listener(self.async_write_ha_state)
+
+
+class RouterUserTrackedAttributeSensor(SensorEntity):
+    """Sensor that exposes a tracked attribute for a user."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = True
+    _attr_force_update = True
+
+    def __init__(self, runtime: Any, user_id: str, display_name: str, attribute_key: str) -> None:
+        self._runtime = runtime
+        self._user_id = user_id
+        self._attribute_key = attribute_key
+        
+        name = attribute_key.replace("_", " ").title()
+        self._attr_name = f"{display_name}'s {name}"
+        self._attr_unique_id = f"{runtime.entry_id}_{user_id}_attr_{attribute_key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, runtime.entry_id)},
+            name=runtime.title,
+            manufacturer="Multi-User Scale Router",
+            model="Multi-User Router",
+        )
+
+        key_lower = attribute_key.lower()
+
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+        # Determine unit and device class from key name.
+        if "impedance" in key_lower or "resistance" in key_lower:
+            self._attr_native_unit_of_measurement = "Ω"
+        elif "mass" in key_lower or "weight" in key_lower:
+            self._attr_device_class = SensorDeviceClass.WEIGHT
+            source_state = runtime.hass.states.get(runtime.source_entity_id)
+            if source_state:
+                self._attr_native_unit_of_measurement = source_state.attributes.get("unit_of_measurement", "kg")
+            else:
+                self._attr_native_unit_of_measurement = "kg"
+        elif any(x in key_lower for x in ["percent", "percentage", "fat", "water", "protein"]):
+            self._attr_native_unit_of_measurement = "%"
+        elif "metabolic" in key_lower or "bmr" in key_lower:
+            self._attr_native_unit_of_measurement = "kcal"
+
+        # Determine icon from key name, with source-entity fallback.
+        if "impedance" in key_lower or "resistance" in key_lower:
+            self._attr_icon = "mdi:omega"
+        elif "fat_free" in key_lower:
+            self._attr_icon = "mdi:run"
+        elif "water" in key_lower:
+            self._attr_icon = "mdi:water-percent"
+        elif "fat" in key_lower:
+            self._attr_icon = "mdi:human-handsdown"
+        elif "muscle" in key_lower:
+            self._attr_icon = "mdi:weight-lifter"
+        elif "bone" in key_lower:
+            self._attr_icon = "mdi:bone"
+        elif "bmi" in key_lower or "body_mass_index" in key_lower:
+            self._attr_icon = "mdi:human-male-height-variant"
+        elif "metabolic" in key_lower or "bmr" in key_lower:
+            self._attr_icon = "mdi:fire"
+        elif "protein" in key_lower:
+            self._attr_icon = "mdi:egg-fried"
+        else:
+            # Fall back to the source entity's icon for unrecognised keys.
+            source_state = runtime.hass.states.get(runtime.source_entity_id)
+            if source_state:
+                self._attr_icon = source_state.attributes.get("icon")
+
+        runtime.add_listener(self.async_write_ha_state)
+
+    @property
+    def native_value(self) -> str | float | None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None:
+            return None
+        tracked = measurement.raw.get("tracked_attributes")
+        if not tracked or not isinstance(tracked, dict):
+            return None
+        return tracked.get(self._attribute_key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None:
+            return None
+        return {
+            "measurement_id": measurement.measurement_id,
+            "source_entity_id": self._runtime.source_entity_id,
+            "source_attribute": self._attribute_key,
+        }
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._runtime.remove_listener(self.async_write_ha_state)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -181,9 +362,22 @@ async def async_setup_entry(
         return
 
     entities = [RouterPendingSensor(runtime), RouterUsersSensor(runtime)]
+
+    discovered_attributes = set(runtime.tracked_attributes)
+
     for user in runtime.users:
         entities.append(
             RouterUserWeightSensor(runtime, user.user_id, user.display_name)
         )
+        for entity_id in runtime.tracked_entities:
+            entities.append(
+                RouterUserTrackedEntitySensor(runtime, user.user_id, user.display_name, entity_id)
+            )
+        for attr_key in discovered_attributes:
+            if "history" in attr_key.lower() or "list" in attr_key.lower():
+                continue
+            entities.append(
+                RouterUserTrackedAttributeSensor(runtime, user.user_id, user.display_name, attr_key)
+            )
 
     async_add_entities(entities)

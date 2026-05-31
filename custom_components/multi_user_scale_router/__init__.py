@@ -8,9 +8,10 @@ from urllib.parse import unquote
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers.start import async_at_started
 
 from .const import (
     CONF_DEVICE_ID,
@@ -94,9 +95,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _register_services(hass)
 
-    # Reconcile Settings → Repairs issues for this entry's profiles.
-    # Runs again on options-flow reload because that re-enters setup.
-    async_scan_repair_issues(hass, entry)
+    # Surface misconfigured profiles on Settings → Repairs. Deferred via
+    # `async_at_started` so the mobile_app integration has finished
+    # registering its `notify.mobile_app_*` services before we check
+    # whether they exist — otherwise we'd false-positive on every cold
+    # boot. If HA is already up (config-entry reload after an options-
+    # flow change), the callback fires immediately.
+    @callback
+    def _scan_when_ready(hass: HomeAssistant) -> None:
+        async_scan_repair_issues(hass, entry)
+
+    entry.async_on_unload(async_at_started(hass, _scan_when_ready))
     return True
 
 

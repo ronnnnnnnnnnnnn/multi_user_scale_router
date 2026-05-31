@@ -14,11 +14,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfMass
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import MassConverter
 
 from .const import (
+    CONF_DEVICE_ID,
     CONF_HISTORY_RETENTION_DAYS,
     CONF_MAX_HISTORY_SIZE,
     CONF_MOBILE_NOTIFY_SERVICES,
@@ -31,6 +32,9 @@ from .const import (
     DEFAULT_MIN_TOLERANCE_KG,
     DOMAIN,
     MAX_PENDING_MEASUREMENTS,
+
+    CONF_SETTLING_DELAY,
+
 )
 from multi_user_scale_core import (
     MeasurementCandidate,
@@ -229,6 +233,18 @@ class RouterRuntime:
             self.router.set_users(users)
 
         self.source_entity_id = self.entry_data[CONF_SOURCE_ENTITY_ID]
+        self.settling_delay = self.entry_data.get(CONF_SETTLING_DELAY, 2.0)
+        
+        self.tracked_entities: list[str] = []
+        self.tracked_attributes: set[str] = set()
+
+        for metric in self.entry_data.get("tracked_metrics", []):
+            if "." in metric:
+                self.tracked_entities.append(metric)
+            else:
+                self.tracked_attributes.add(metric.lower())
+
+        self._async_capture_cancel: Callable[[], None] | None = None
 
     @property
     def title(self) -> str:
@@ -385,6 +401,9 @@ class RouterRuntime:
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
+        if self._async_capture_cancel:
+            self._async_capture_cancel()
+            self._async_capture_cancel = None
         for measurement_id in list(self._pending_measurements):
             pending = self._pending_measurements.get(measurement_id)
             if (
@@ -473,24 +492,6 @@ class RouterRuntime:
             return localized.strftime(fmt).lstrip("0")
         return None
 
-    def _format_date_unambiguous(self, localized: datetime, language: str) -> str:
-        """Format date with spelled month (e.g. Mar 8, 2026) for clarity."""
-        try:
-            from babel.dates import format_date as babel_format_date
-
-            return babel_format_date(
-                localized,
-                format="medium",
-                locale=language.replace("-", "_"),
-            )
-        except Exception as err:
-            _LOGGER.debug(
-                "Babel format_date failed (locale=%s), using strftime fallback: %s",
-                language,
-                err,
-            )
-            return localized.strftime("%b %d, %Y")
-
     def _format_notification_timestamp(self, value: datetime) -> str:
         localized = dt_util.as_local(value)
         language, time_format, date_format = self._get_display_preferences()
@@ -506,7 +507,7 @@ class RouterRuntime:
         time_str = self._format_time_part(localized, time_format, True)
         if time_str is None:
             time_str = localized.strftime("%I:%M:%S %p").lstrip("0")
-        date_str = self._format_date_unambiguous(localized, language)
+        date_str = localized.strftime("%b %d, %Y")
         return f"{date_str} at {time_str} {localized.strftime('%Z')}"
 
     def _format_notification_time(self, value: datetime) -> str:
@@ -515,19 +516,8 @@ class RouterRuntime:
         time_str = self._format_time_part(localized, time_format, False)
         if time_str is not None:
             return time_str
-        try:
-            from babel.dates import format_datetime as babel_format_datetime
-
-            return babel_format_datetime(
-                localized, format="short", locale=language.replace("-", "_")
-            )
-        except Exception as err:
-            _LOGGER.debug(
-                "Babel format_datetime failed (locale=%s), using strftime fallback: %s",
-                language,
-                err,
-            )
-            return localized.strftime("%I:%M %p").lstrip("0")
+            
+        return localized.strftime("%H:%M")
 
     @property
     def last_user_weight_by_id(self) -> dict[str, float]:
@@ -865,12 +855,15 @@ class RouterRuntime:
                 )
 
     def _create_pending_notification(self, measurement_id: str) -> None:
-        pending = self._pending_measurements.get(measurement_id)
-        if pending is None:
+        if measurement_id not in self._pending_measurements:
             return
-        device_id = self.device_id or "DEVICE_ID"
 
-        candidate_lines: list[str] = []
+        pending = self._pending_measurements[measurement_id]
+        device_reg = dr.async_get(self.hass)
+        device_entry = device_reg.async_get_device(identifiers={(DOMAIN, self.entry_id)})
+        device_id = device_entry.id if device_entry else "unknown"
+
+        candidate_lines = []
         for candidate in pending.candidate_details:
             candidate_lines.append(
                 f"- **{candidate['display_name']}** ({candidate['user_id']})"
@@ -1071,15 +1064,53 @@ class RouterRuntime:
             )
             return
 
+        if self._async_capture_cancel:
+            self._async_capture_cancel()
+
+        @callback
+        def _execute_capture(_now: datetime) -> None:
+            self._async_capture_and_route(new_state, weight_kg, unit)
+
+        self._async_capture_cancel = async_call_later(
+            self.hass,
+            self.settling_delay,
+            _execute_capture,
+        )
+
+    @callback
+    def _async_capture_and_route(self, weight_state: Any, weight_kg: float, unit: str) -> None:
+        self._async_capture_cancel = None
+        
+        raw_data = {
+            "source_state": weight_state.state,
+            "source_attributed_unit": unit,
+            "tracked_entities": {},
+            "tracked_attributes": {},
+        }
+
+        if self.tracked_entities:
+            for entity_id in self.tracked_entities:
+                entity_state = self.hass.states.get(entity_id)
+                if entity_state is None or entity_state.state in {"unavailable", "unknown", "none", "None"}:
+                    continue
+                raw_data["tracked_entities"][entity_id] = {
+                    "state": entity_state.state,
+                    "attributes": dict(entity_state.attributes),
+                }
+
+        for key, val in weight_state.attributes.items():
+            if val is None or str(val).lower() in {"unavailable", "unknown", "none"}:
+                continue
+            if key.lower() not in self.tracked_attributes:
+                continue
+            raw_data["tracked_attributes"][key] = val
+
         measurement = WeightMeasurement(
             weight_kg=weight_kg,
             timestamp=datetime.now(tz=timezone.utc),
             source_id=self.source_entity_id,
             source_unit=unit,
-            raw={
-                "source_state": new_state.state,
-                "source_attributed_unit": unit,
-            },
+            raw=raw_data,
         )
         candidates = self.router.evaluate_measurement(measurement)
         resolved_user_ids = self._resolve_candidate_user_ids(measurement, candidates)

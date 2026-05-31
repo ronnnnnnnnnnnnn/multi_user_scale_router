@@ -36,8 +36,10 @@
         "description": "Choose the source weight sensor and detection settings.",
         "data": {
           "source_entity_id": "Source Weight Sensor",
+          "tracked_metrics": "Additional Tracked Metrics",
           "history_retention_days": "History Retention (days)",
-          "max_history_size": "Max History Size (measurements)"
+          "max_history_size": "Max History Size (measurements)",
+          "settling_delay": "Settling Delay (seconds)"
         }
       },
       "add_first_user": {
@@ -108,8 +110,10 @@
         "description": "Update the source sensor and detection settings.",
         "data": {
           "source_entity_id": "Source Weight Sensor",
+          "tracked_metrics": "Additional Tracked Metrics",
           "history_retention_days": "History Retention (days)",
-          "max_history_size": "Max History Size (measurements)"
+          "max_history_size": "Max History Size (measurements)",
+          "settling_delay": "Settling Delay (seconds)"
         }
       }
     },

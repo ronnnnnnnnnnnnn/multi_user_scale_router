@@ -11,9 +11,10 @@ This custom integration automatically routes weight measurements from any connec
     - Automatically detects which person is using the scale based on their weight history
     - Uses a configurable tolerance system to handle natural weight fluctuations
     - Supports linking users to Home Assistant Person entities to exclude users who are `not_home`
+- **Routes additional metrics:** Capable of capturing and routing secondary scale metrics (e.g., Body Fat, BMI, Impedance, Water Mass) to the correct user alongside their weight.
 - Actionable mobile push notifications for ambiguous measurements with one-tap assignment buttons
 - Services to manually assign, reassign, and remove measurements
-- Configurable history retention period and maximum history size
+- Configurable history retention period, maximum history size and timing settings (settling delay)
 - Measurement history is persisted across Home Assistant restarts
 
 ## Notes
@@ -45,7 +46,8 @@ This custom integration automatically routes weight measurements from any connec
 2. Click **Add Integration** and search for "Multi-User Scale Router".
 3. Select the weight sensor entity from your scale integration as the source.
 4. Add at least one user profile.
-5. Optionally adjust advanced settings (history size, retention period, weight tolerance).
+5. (Optional) Choose additional tracked metrics (e.g., body fat, BMI) that should be routed to the user when a weight measurement occurs.
+6. (Optional) Adjust advanced settings (history size, retention period, weight tolerance and timing delays).
 
 ### User Profile Configuration Options
 
@@ -60,6 +62,16 @@ When adding or editing user profiles (**Settings → Devices & Services → Mult
 - **Notification Services (optional):** Enter one or more Home Assistant notify service names (e.g. `notify.mobile_app_my_phone`) to receive actionable notifications for ambiguous measurements:
     - When enabled, you'll receive a mobile notification with tap-to-assign buttons directly on your phone
     - Each candidate user gets a personalised notification
+
+### Additional Tracked Metrics
+
+You can select additional metrics (like Body Fat, BMI, Impedance) to route alongside the weight measurement.
+When a weight measurement is assigned to a user, the integration checks the state of these tracked metrics. If they were updated around the same time as the weight sensor, the integration binds those values to the user and updates their personal sensors.
+
+- **Tracked Metrics Picker:** You can select from sibling entities on the same scale device or attributes of the source weight sensor itself.
+- **Timing Configuration:**
+  - **Settling Delay:** The integration waits this long (in seconds) after a weight update before capturing the other metrics, giving slow Bluetooth/Wi-Fi updates a chance to arrive in Home Assistant.
+
 
 ## Multi-User Support
 

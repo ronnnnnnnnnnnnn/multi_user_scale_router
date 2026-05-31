@@ -9,6 +9,8 @@
   "integration_type": "service",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/ronnnnnnnnnnnnn/multi_user_scale_router/issues",
-  "requirements": ["multi-user-scale-core==0.1.1"],
-  "version": "0.1.2"
+  "requirements": [
+    "multi-user-scale-core==0.1.1"
+  ],
+  "version": "0.2.0"
 }
