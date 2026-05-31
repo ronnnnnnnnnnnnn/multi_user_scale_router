@@ -19,7 +19,6 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import MassConverter
 
 from .const import (
-    CONF_DEVICE_ID,
     CONF_HISTORY_RETENTION_DAYS,
     CONF_MAX_HISTORY_SIZE,
     CONF_MOBILE_NOTIFY_SERVICES,
