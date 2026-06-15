@@ -9,7 +9,11 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry, OptionsFlow
-from homeassistant.const import ATTR_DEVICE_CLASS, ATTR_UNIT_OF_MEASUREMENT
+from homeassistant.const import (
+    ATTR_DEVICE_CLASS,
+    ATTR_UNIT_OF_MEASUREMENT,
+    STATE_UNKNOWN,
+)
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import (
     config_validation as cv,
@@ -80,6 +84,26 @@ def _validate_person_entity_unique(
         if user.get(CONF_PERSON_ENTITY) == person_entity:
             return False
     return True
+
+
+def _validate_person_entity_has_tracker(hass, person_entity: str | None) -> bool:
+    """A person entity is only useful here if it can report a location.
+
+    A ``person.X`` with no device trackers assigned sits in state
+    ``unknown``; linking it would do nothing (location-based matching only
+    skips a user when their person is ``not_home``). Reject that so users
+    don't configure an inert link. ``unavailable`` is treated as
+    acceptable — it's typically transient (HA restart, brief tracker
+    outage), and blocking on it would be a flaky validation. A missing
+    state is also accepted (the entity selector only offers existing
+    entities, so this is purely defensive).
+    """
+    if not person_entity:
+        return True
+    state = hass.states.get(person_entity)
+    if state is None:
+        return True
+    return state.state != STATE_UNKNOWN
 
 
 def _build_user(
@@ -361,6 +385,10 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 person_entity, configured_users
             ):
                 errors[CONF_PERSON_ENTITY] = "duplicate_person_entity"
+            elif person_entity and not _validate_person_entity_has_tracker(
+                self.hass, person_entity
+            ):
+                errors[CONF_PERSON_ENTITY] = "person_entity_no_tracker"
 
             if errors:
                 return self.async_show_form(
@@ -543,6 +571,10 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                 errors["base"] = "empty_user_name"
             if not _validate_person_entity_unique(person_entity, self._users):
                 errors[CONF_PERSON_ENTITY] = "duplicate_person_entity"
+            elif person_entity and not _validate_person_entity_has_tracker(
+                self.hass, person_entity
+            ):
+                errors[CONF_PERSON_ENTITY] = "person_entity_no_tracker"
 
             if errors:
                 return self.async_show_form(
@@ -617,6 +649,10 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                 exclude_user_id=selected_user_id,
             ):
                 errors[CONF_PERSON_ENTITY] = "duplicate_person_entity"
+            elif person_entity and not _validate_person_entity_has_tracker(
+                self.hass, person_entity
+            ):
+                errors[CONF_PERSON_ENTITY] = "person_entity_no_tracker"
 
             if errors:
                 return self.async_show_form(
