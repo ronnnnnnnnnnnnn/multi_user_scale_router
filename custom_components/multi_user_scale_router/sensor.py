@@ -44,16 +44,20 @@ class RouterUserWeightSensor(SensorEntity):
             manufacturer="Multi-User Scale Router",
             model="Multi-User Router",
         )
-        
+
         history = self._runtime.router.get_user_history(self._user_id)
-        self._last_history_ids = [m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]]
-        
+        self._last_history_ids = [
+            m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]
+        ]
+
         runtime.add_listener(self._handle_runtime_update)
 
     @callback
     def _handle_runtime_update(self) -> None:
         history = self._runtime.router.get_user_history(self._user_id)
-        current_history_ids = [m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]]
+        current_history_ids = [
+            m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]
+        ]
 
         if current_history_ids == self._last_history_ids:
             return
