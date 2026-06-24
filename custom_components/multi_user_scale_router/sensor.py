@@ -16,7 +16,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DATA_ROUTER, DOMAIN
+from .const import DATA_ROUTER, DOMAIN, MAX_EXPOSED_HISTORY_ITEMS
 
 
 def _weight_to_display(value: float | None) -> float | None:
@@ -32,7 +32,6 @@ class RouterUserWeightSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_should_poll = False
     _attr_has_entity_name = True
-    _attr_force_update = True
 
     def __init__(self, runtime: Any, user_id: str, display_name: str) -> None:
         self._runtime = runtime
@@ -45,7 +44,22 @@ class RouterUserWeightSensor(SensorEntity):
             manufacturer="Multi-User Scale Router",
             model="Multi-User Router",
         )
-        runtime.add_listener(self.async_write_ha_state)
+        
+        history = self._runtime.router.get_user_history(self._user_id)
+        self._last_history_ids = [m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]]
+        
+        runtime.add_listener(self._handle_runtime_update)
+
+    @callback
+    def _handle_runtime_update(self) -> None:
+        history = self._runtime.router.get_user_history(self._user_id)
+        current_history_ids = [m.measurement_id for m in history[-MAX_EXPOSED_HISTORY_ITEMS:]]
+
+        if current_history_ids == self._last_history_ids:
+            return
+
+        self._last_history_ids = current_history_ids
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> float | None:
@@ -66,7 +80,7 @@ class RouterUserWeightSensor(SensorEntity):
         display_unit = self._runtime.display_unit
         is_pounds = display_unit == "lb"
         weight_history = []
-        for measurement in history[-20:]:
+        for measurement in history[-MAX_EXPOSED_HISTORY_ITEMS:]:
             display_measurement = {
                 "measurement_id": measurement.measurement_id,
                 "timestamp": measurement.timestamp.isoformat(),
@@ -90,7 +104,7 @@ class RouterUserWeightSensor(SensorEntity):
         return attrs
 
     async def async_will_remove_from_hass(self) -> None:
-        self._runtime.remove_listener(self.async_write_ha_state)
+        self._runtime.remove_listener(self._handle_runtime_update)
 
 
 class RouterPendingSensor(SensorEntity):
@@ -189,7 +203,6 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
 
     _attr_should_poll = False
     _attr_has_entity_name = True
-    _attr_force_update = True
 
     def __init__(
         self, runtime: Any, user_id: str, display_name: str, source_entity_id: str
@@ -305,6 +318,7 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
             return
         self._attr_native_value = value
         self._value_measurement_id = measurement.measurement_id
+        self._attr_force_update = True
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -316,7 +330,6 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
 
     _attr_should_poll = False
     _attr_has_entity_name = True
-    _attr_force_update = True
 
     def __init__(
         self, runtime: Any, user_id: str, display_name: str, attribute_key: str
@@ -433,6 +446,7 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
             return
         self._attr_native_value = value
         self._value_measurement_id = measurement.measurement_id
+        self._attr_force_update = True
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
