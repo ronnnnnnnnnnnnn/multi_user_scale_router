@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from typing import Any
 
@@ -32,6 +32,9 @@ from .const import (
     DOMAIN,
     MAX_PENDING_MEASUREMENTS,
     CONF_SETTLING_DELAY,
+    CONF_BACK_MARGIN,
+    DEFAULT_SETTLING_DELAY,
+    DEFAULT_BACK_MARGIN,
     SYSTEM_ATTRIBUTES,
 )
 from multi_user_scale_core import (
@@ -269,7 +272,14 @@ class RouterRuntime:
             self.router.set_users(users)
 
         self.source_entity_id = self.entry_data[CONF_SOURCE_ENTITY_ID]
-        self.settling_delay = self.entry_data.get(CONF_SETTLING_DELAY, 2.0)
+        self.settling_delay = self.entry_data.get(
+            CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY
+        )
+        self.back_margin = _safe_float_config(
+            self.entry_data.get(CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN),
+            DEFAULT_BACK_MARGIN,
+            CONF_BACK_MARGIN,
+        )
 
         self.tracked_entities: list[str] = []
         self.tracked_attributes: set[str] = set()
@@ -1149,26 +1159,39 @@ class RouterRuntime:
             "tracked_attributes": {},
         }
 
-        if self.tracked_entities:
-            for entity_id in self.tracked_entities:
-                entity_state = self.hass.states.get(entity_id)
-                skipped = entity_state is None or entity_state.state in {
-                    "unavailable",
-                    "unknown",
-                    "none",
-                    "None",
-                }
+        # Tracked entities update on their own cadence, so gate them on freshness:
+        # keep a value only if it was updated no earlier than the weight reading
+        # (minus a small back-margin). Older values are carryover from a previous
+        # weigh-in. Tracked attributes live on the weight state itself, so they
+        # share its timestamp and are trusted without a gate.
+        reference = weight_state.last_updated
+        for entity_id in self.tracked_entities:
+            entity_state = self.hass.states.get(entity_id)
+            if entity_state is None or str(entity_state.state).lower() in {
+                "unavailable",
+                "unknown",
+                "none",
+            }:
                 _LOGGER.debug(
-                    "Tracked entity at capture (%s): %s",
-                    "SKIPPED - unavailable/unknown" if skipped else "recorded",
+                    "Tracked entity skipped (unavailable) at capture: %s",
                     _describe_state_for_log(entity_id, entity_state, dt_util.utcnow()),
                 )
-                if skipped:
-                    continue
-                raw_data["tracked_entities"][entity_id] = {
-                    "state": entity_state.state,
-                    "attributes": dict(entity_state.attributes),
-                }
+                continue
+            entity_updated = entity_state.last_updated
+            if (
+                reference is not None
+                and entity_updated is not None
+                and entity_updated < reference - timedelta(seconds=self.back_margin)
+            ):
+                _LOGGER.debug(
+                    "Tracked entity skipped (stale) at capture: %s",
+                    _describe_state_for_log(entity_id, entity_state, dt_util.utcnow()),
+                )
+                continue
+            raw_data["tracked_entities"][entity_id] = {
+                "state": entity_state.state,
+                "attributes": dict(entity_state.attributes),
+            }
 
         for key, val in weight_state.attributes.items():
             if val is None or str(val).lower() in {"unavailable", "unknown", "none"}:

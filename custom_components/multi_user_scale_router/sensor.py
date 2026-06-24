@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -13,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from .const import DATA_ROUTER, DOMAIN
 
@@ -183,7 +184,7 @@ class RouterUsersSensor(SensorEntity):
         self._runtime.remove_listener(self.async_write_ha_state)
 
 
-class RouterUserTrackedEntitySensor(SensorEntity):
+class RouterUserTrackedEntitySensor(RestoreSensor):
     """Sensor that exposes a tracked entity for a user."""
 
     _attr_should_poll = False
@@ -252,11 +253,11 @@ class RouterUserTrackedEntitySensor(SensorEntity):
             manufacturer="Multi-User Scale Router",
             model="Multi-User Router",
         )
-        runtime.add_listener(self.async_write_ha_state)
+        self._last_seen_id: str | None = None
+        self._value_measurement_id: str | None = None
+        self._attr_native_value = None
 
-    @property
-    def native_value(self) -> str | float | None:
-        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+    def _extract_value(self, measurement: Any) -> str | float | None:
         if measurement is None:
             return None
         tracked = measurement.raw.get("tracked_entities")
@@ -269,19 +270,48 @@ class RouterUserTrackedEntitySensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
-        if measurement is None:
+        if self._value_measurement_id is None:
             return None
         return {
-            "measurement_id": measurement.measurement_id,
+            "measurement_id": self._value_measurement_id,
             "source_entity_id": self._source_entity_id,
         }
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        value = self._extract_value(measurement)
+        if value is not None:
+            self._attr_native_value = value
+            self._last_seen_id = measurement.measurement_id
+            self._value_measurement_id = measurement.measurement_id
+        else:
+            last = await self.async_get_last_sensor_data()
+            if last is not None and last.native_value is not None:
+                self._attr_native_value = last.native_value
+            if measurement is not None:
+                self._last_seen_id = measurement.measurement_id
+        self._runtime.add_listener(self._handle_runtime_update)
+
+    @callback
+    def _handle_runtime_update(self) -> None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None or measurement.measurement_id == self._last_seen_id:
+            return
+        self._last_seen_id = measurement.measurement_id
+        value = self._extract_value(measurement)
+        if value is None:
+            # Field absent on this weigh-in: keep the last known value.
+            return
+        self._attr_native_value = value
+        self._value_measurement_id = measurement.measurement_id
+        self.async_write_ha_state()
+
     async def async_will_remove_from_hass(self) -> None:
-        self._runtime.remove_listener(self.async_write_ha_state)
+        self._runtime.remove_listener(self._handle_runtime_update)
 
 
-class RouterUserTrackedAttributeSensor(SensorEntity):
+class RouterUserTrackedAttributeSensor(RestoreSensor):
     """Sensor that exposes a tracked attribute for a user."""
 
     _attr_should_poll = False
@@ -353,11 +383,11 @@ class RouterUserTrackedAttributeSensor(SensorEntity):
             if source_state:
                 self._attr_icon = source_state.attributes.get("icon")
 
-        runtime.add_listener(self.async_write_ha_state)
+        self._last_seen_id: str | None = None
+        self._value_measurement_id: str | None = None
+        self._attr_native_value = None
 
-    @property
-    def native_value(self) -> str | float | None:
-        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+    def _extract_value(self, measurement: Any) -> str | float | None:
         if measurement is None:
             return None
         tracked = measurement.raw.get("tracked_attributes")
@@ -367,17 +397,46 @@ class RouterUserTrackedAttributeSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
-        if measurement is None:
+        if self._value_measurement_id is None:
             return None
         return {
-            "measurement_id": measurement.measurement_id,
+            "measurement_id": self._value_measurement_id,
             "source_entity_id": self._runtime.source_entity_id,
             "source_attribute": self._attribute_key,
         }
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        value = self._extract_value(measurement)
+        if value is not None:
+            self._attr_native_value = value
+            self._last_seen_id = measurement.measurement_id
+            self._value_measurement_id = measurement.measurement_id
+        else:
+            last = await self.async_get_last_sensor_data()
+            if last is not None and last.native_value is not None:
+                self._attr_native_value = last.native_value
+            if measurement is not None:
+                self._last_seen_id = measurement.measurement_id
+        self._runtime.add_listener(self._handle_runtime_update)
+
+    @callback
+    def _handle_runtime_update(self) -> None:
+        measurement = self._runtime.router.get_user_last_measurement(self._user_id)
+        if measurement is None or measurement.measurement_id == self._last_seen_id:
+            return
+        self._last_seen_id = measurement.measurement_id
+        value = self._extract_value(measurement)
+        if value is None:
+            # Field absent on this weigh-in: keep the last known value.
+            return
+        self._attr_native_value = value
+        self._value_measurement_id = measurement.measurement_id
+        self.async_write_ha_state()
+
     async def async_will_remove_from_hass(self) -> None:
-        self._runtime.remove_listener(self.async_write_ha_state)
+        self._runtime.remove_listener(self._handle_runtime_update)
 
 
 async def async_setup_entry(

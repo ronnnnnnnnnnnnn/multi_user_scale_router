@@ -47,7 +47,8 @@
           "tracked_metrics": "Additional Tracked Metrics",
           "history_retention_days": "History Retention (days)",
           "max_history_size": "Max History Size (measurements)",
-          "settling_delay": "Settling Delay (seconds)"
+          "settling_delay": "Settling Delay (seconds)",
+          "back_margin": "Extra-Metric Freshness Window (seconds)"
         }
       },
       "add_first_user": {
@@ -131,7 +132,8 @@
           "tracked_metrics": "Additional Tracked Metrics",
           "history_retention_days": "History Retention (days)",
           "max_history_size": "Max History Size (measurements)",
-          "settling_delay": "Settling Delay (seconds)"
+          "settling_delay": "Settling Delay (seconds)",
+          "back_margin": "Extra-Metric Freshness Window (seconds)"
         }
       }
     },

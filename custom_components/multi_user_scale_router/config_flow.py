@@ -32,10 +32,12 @@ from .const import (
     CONF_SOURCE_ENTITY_ID,
     CONF_TRACKED_METRICS,
     CONF_SETTLING_DELAY,
+    CONF_BACK_MARGIN,
     CONF_USER_ID,
     DEFAULT_HISTORY_RETENTION_DAYS,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_SETTLING_DELAY,
+    DEFAULT_BACK_MARGIN,
     DOMAIN,
     SYSTEM_ATTRIBUTES,
 )
@@ -350,6 +352,9 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_SETTLING_DELAY: user_input.get(
                         CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY
                     ),
+                    CONF_BACK_MARGIN: user_input.get(
+                        CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN
+                    ),
                     CONF_HISTORY_RETENTION_DAYS: user_input[
                         CONF_HISTORY_RETENTION_DAYS
                     ],
@@ -417,6 +422,9 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_TRACKED_METRICS: self.context.get(CONF_TRACKED_METRICS, []),
                 CONF_SETTLING_DELAY: self.context.get(
                     CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY
+                ),
+                CONF_BACK_MARGIN: self.context.get(
+                    CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN
                 ),
                 CONF_HISTORY_RETENTION_DAYS: self.context[CONF_HISTORY_RETENTION_DAYS],
                 CONF_MAX_HISTORY_SIZE: self.context[CONF_MAX_HISTORY_SIZE],
@@ -486,6 +494,10 @@ class ScaleRouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_SETTLING_DELAY,
                     default=defaults.get(CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=60.0)),
+                vol.Required(
+                    CONF_BACK_MARGIN,
+                    default=defaults.get(CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=60.0)),
             }
         )
@@ -727,6 +739,9 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                     CONF_SETTLING_DELAY: user_input.get(
                         CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY
                     ),
+                    CONF_BACK_MARGIN: user_input.get(
+                        CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN
+                    ),
                     CONF_HISTORY_RETENTION_DAYS: user_input[
                         CONF_HISTORY_RETENTION_DAYS
                     ],
@@ -831,6 +846,10 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SETTLING_DELAY,
                     default=defaults.get(CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=60.0)),
+                vol.Required(
+                    CONF_BACK_MARGIN,
+                    default=defaults.get(CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN),
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=60.0)),
             }
         )
