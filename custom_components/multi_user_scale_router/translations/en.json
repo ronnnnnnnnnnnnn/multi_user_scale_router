@@ -48,7 +48,7 @@
           "history_retention_days": "History Retention (days)",
           "max_history_size": "Max History Size (measurements)",
           "settling_delay": "Settling Delay (seconds)",
-          "back_margin": "Extra-Metric Freshness Window (seconds)"
+          "back_margin": "Back Margin Window (seconds)"
         }
       },
       "add_first_user": {
@@ -133,7 +133,7 @@
           "history_retention_days": "History Retention (days)",
           "max_history_size": "Max History Size (measurements)",
           "settling_delay": "Settling Delay (seconds)",
-          "back_margin": "Extra-Metric Freshness Window (seconds)"
+          "back_margin": "Back Margin Window (seconds)"
         }
       }
     },
