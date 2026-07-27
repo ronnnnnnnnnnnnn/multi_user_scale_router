@@ -20,6 +20,7 @@ from homeassistant.util.unit_conversion import MassConverter
 
 from .const import (
     CONF_HISTORY_RETENTION_DAYS,
+    CONF_KEEP_HISTORY_FOREVER,
     CONF_MAX_HISTORY_SIZE,
     CONF_MOBILE_NOTIFY_SERVICES,
     CONF_MIN_TOLERANCE_KG,
@@ -240,6 +241,9 @@ class RouterRuntime:
                 ),
                 DEFAULT_MIN_TOLERANCE_KG,
                 CONF_MIN_TOLERANCE_KG,
+            ),
+            keep_history_forever=bool(
+                self.entry_data.get(CONF_KEEP_HISTORY_FOREVER, False)
             ),
         )
 

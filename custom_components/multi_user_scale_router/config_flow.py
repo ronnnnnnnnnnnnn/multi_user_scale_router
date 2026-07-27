@@ -14,7 +14,7 @@ from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     STATE_UNKNOWN,
 )
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import (
     config_validation as cv,
     entity_registry as er,
@@ -25,6 +25,7 @@ from multi_user_scale_core import RouterConfig, UserProfile, WeightRouter
 
 from .const import (
     CONF_HISTORY_RETENTION_DAYS,
+    CONF_KEEP_HISTORY_FOREVER,
     CONF_MAX_HISTORY_SIZE,
     CONF_MOBILE_NOTIFY_SERVICES,
     CONF_PERSON_ENTITY,
@@ -44,6 +45,10 @@ from .const import (
 
 CONF_USER_NAME = "user_name"
 CONF_ADD_ANOTHER_USER = "add_another_user"
+
+# Collapsible section key in the router-settings options form; the history
+# limit fields arrive nested under this key in user_input.
+SECTION_CLEANUP_LIMITS = "cleanup_limits"
 
 
 def _slugify_user(value: str, index: int) -> str:
@@ -315,6 +320,12 @@ def _sync_router_state(data: dict[str, Any]) -> dict[str, Any]:
                 max_history_size=payload.get(
                     CONF_MAX_HISTORY_SIZE,
                     DEFAULT_MAX_HISTORY_SIZE,
+                ),
+                # Must be passed here too: set_config() re-prunes, and
+                # omitting the flag would prune a keep-forever user's
+                # history on every options save.
+                keep_history_forever=bool(
+                    payload.get(CONF_KEEP_HISTORY_FOREVER, False)
                 ),
             )
         )
@@ -732,6 +743,10 @@ class ScaleRouterOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
+            # The cleanup limits arrive nested under their section key; they
+            # are stored even while keep-forever is enabled so the previous
+            # limits are restored when it is turned off again.
+            cleanup_limits = user_input[SECTION_CLEANUP_LIMITS]
             return await self._update_entry(
                 **{
                     CONF_SOURCE_ENTITY_ID: user_input[CONF_SOURCE_ENTITY_ID],
@@ -742,10 +757,11 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                     CONF_BACK_MARGIN: user_input.get(
                         CONF_BACK_MARGIN, DEFAULT_BACK_MARGIN
                     ),
-                    CONF_HISTORY_RETENTION_DAYS: user_input[
+                    CONF_KEEP_HISTORY_FOREVER: user_input[CONF_KEEP_HISTORY_FOREVER],
+                    CONF_HISTORY_RETENTION_DAYS: cleanup_limits[
                         CONF_HISTORY_RETENTION_DAYS
                     ],
-                    CONF_MAX_HISTORY_SIZE: user_input[CONF_MAX_HISTORY_SIZE],
+                    CONF_MAX_HISTORY_SIZE: cleanup_limits[CONF_MAX_HISTORY_SIZE],
                 }
             )
 
@@ -831,18 +847,29 @@ class ScaleRouterOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Required(
-                    CONF_HISTORY_RETENTION_DAYS,
-                    default=defaults.get(
-                        CONF_HISTORY_RETENTION_DAYS,
-                        DEFAULT_HISTORY_RETENTION_DAYS,
+                    CONF_KEEP_HISTORY_FOREVER,
+                    default=bool(defaults.get(CONF_KEEP_HISTORY_FOREVER, False)),
+                ): bool,
+                vol.Required(SECTION_CLEANUP_LIMITS): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_HISTORY_RETENTION_DAYS,
+                                default=defaults.get(
+                                    CONF_HISTORY_RETENTION_DAYS,
+                                    DEFAULT_HISTORY_RETENTION_DAYS,
+                                ),
+                            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                            vol.Required(
+                                CONF_MAX_HISTORY_SIZE,
+                                default=defaults.get(
+                                    CONF_MAX_HISTORY_SIZE, DEFAULT_MAX_HISTORY_SIZE
+                                ),
+                            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+                        }
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                vol.Required(
-                    CONF_MAX_HISTORY_SIZE,
-                    default=defaults.get(
-                        CONF_MAX_HISTORY_SIZE, DEFAULT_MAX_HISTORY_SIZE
-                    ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+                    {"collapsed": True},
+                ),
                 vol.Required(
                     CONF_SETTLING_DELAY,
                     default=defaults.get(CONF_SETTLING_DELAY, DEFAULT_SETTLING_DELAY),

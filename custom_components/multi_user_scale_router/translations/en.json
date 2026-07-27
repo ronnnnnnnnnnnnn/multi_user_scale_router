@@ -130,10 +130,26 @@
         "data": {
           "source_entity_id": "Source Weight Sensor",
           "tracked_metrics": "Additional Tracked Metrics",
-          "history_retention_days": "History Retention (days)",
-          "max_history_size": "Max History Size (measurements)",
           "settling_delay": "Settling Delay (seconds)",
-          "back_margin": "Back Margin Window (seconds)"
+          "back_margin": "Back Margin Window (seconds)",
+          "keep_history_forever": "Keep history forever"
+        },
+        "data_description": {
+          "keep_history_forever": "Never delete weight measurements automatically. While enabled, the automatic cleanup limits below are ignored."
+        },
+        "sections": {
+          "cleanup_limits": {
+            "name": "Automatic cleanup limits",
+            "description": "Only apply while 'Keep history forever' is disabled.",
+            "data": {
+              "history_retention_days": "History Retention (days)",
+              "max_history_size": "Max History Size (measurements)"
+            },
+            "data_description": {
+              "history_retention_days": "How many days of measurements to keep. Range: 1-365 days.",
+              "max_history_size": "Maximum measurements stored per user. Range: 1-1000."
+            }
+          }
         }
       }
     },

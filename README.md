@@ -14,7 +14,7 @@ This custom integration automatically routes weight measurements from any connec
 - **Routes additional metrics:** Capable of capturing and routing secondary scale metrics (e.g., Body Fat, BMI, Impedance, Water Mass) to the correct user alongside their weight.
 - Actionable mobile push notifications for ambiguous measurements with one-tap assignment buttons
 - Services to manually assign, reassign, and remove measurements
-- Configurable history retention period, maximum history size and timing settings (settling delay)
+- Configurable history retention period, maximum history size (or keep history forever) and timing settings (settling delay)
 - Measurement history is persisted across Home Assistant restarts
 
 ## Notes

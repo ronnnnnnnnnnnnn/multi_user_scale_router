@@ -11,6 +11,9 @@ CONF_PERSON_ENTITY = "person_entity"
 CONF_MOBILE_NOTIFY_SERVICES = "mobile_notify_services"
 CONF_HISTORY_RETENTION_DAYS = "history_retention_days"
 CONF_MAX_HISTORY_SIZE = "max_history_size"
+# When True, the age/size limits above are ignored and history is kept
+# forever (maps to multi-user-scale-core's RouterConfig.keep_history_forever)
+CONF_KEEP_HISTORY_FOREVER = "keep_history_forever"
 CONF_MIN_TOLERANCE_KG = "min_tolerance_kg"
 CONF_SETTLING_DELAY = "settling_delay"
 CONF_BACK_MARGIN = "back_margin"
