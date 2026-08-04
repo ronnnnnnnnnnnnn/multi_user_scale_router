@@ -68,3 +68,8 @@ UNIT_SPELLING_ALIASES = {
     "pound": "lb",
     "pounds": "lb",
 }
+
+# Entry-data key recording the display unit last written to the entity
+# registry by the display-unit sync sweep. Written only by the integration,
+# never by the user; absence means the sweep has never run for this entry.
+CONF_LAST_SYNCED_DISPLAY_UNIT = "last_synced_display_unit"

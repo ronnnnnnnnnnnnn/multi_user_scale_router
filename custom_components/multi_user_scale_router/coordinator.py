@@ -11,10 +11,15 @@ from urllib.parse import quote
 from typing import Any
 
 from homeassistant.components import persistent_notification
+from homeassistant.components.sensor import (
+    DOMAIN as SENSOR_DOMAIN,
+    SensorDeviceClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfMass
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import MassConverter
@@ -22,6 +27,7 @@ from homeassistant.util.unit_conversion import MassConverter
 from .const import (
     CONF_HISTORY_RETENTION_DAYS,
     CONF_KEEP_HISTORY_FOREVER,
+    CONF_LAST_SYNCED_DISPLAY_UNIT,
     CONF_MAX_HISTORY_SIZE,
     CONF_MOBILE_NOTIFY_SERVICES,
     CONF_MIN_TOLERANCE_KG,
@@ -164,15 +170,81 @@ def _convert_to_kg(value: float, unit: str) -> float | None:
 
 
 def _normalize_display_unit(unit: str | None) -> str:
+    """Map a source-reported unit to the display unit it implies.
+
+    Any valid HA mass unit is honored (st, g, oz, ...); unknown or missing
+    units fall back to kg.
+    """
     normalized = (unit or "").lower().strip()
     normalized = UNIT_SPELLING_ALIASES.get(normalized, normalized)
-    return "lb" if normalized == "lb" else "kg"
+    if normalized in MassConverter.VALID_UNITS:
+        return normalized
+    return "kg"
 
 
 def _convert_from_kg(value_kg: float, display_unit: str) -> float:
-    if _normalize_display_unit(display_unit) == "lb":
-        return MassConverter.convert(value_kg, UnitOfMass.KILOGRAMS, UnitOfMass.POUNDS)
-    return value_kg
+    return MassConverter.convert(
+        value_kg, UnitOfMass.KILOGRAMS, _normalize_display_unit(display_unit)
+    )
+
+
+def sync_display_unit_overrides(
+    hass: HomeAssistant, entry: ConfigEntry, display_unit: str
+) -> None:
+    """Propagate a changed source unit to this entry's weight entities.
+
+    Ported from renpho_fitness_scale_ble. Writes the per-entity display
+    unit (the same registry option the entity-settings dialog writes) for
+    every weight-class sensor belonging to this config entry. Native values
+    stay kg throughout — only the display layer moves, so recorded history
+    converts cleanly.
+
+    Runs only when the unit actually changed since the last sync (tracked
+    in entry data): per-entity units users set themselves survive restarts
+    and reloads, and are only overridden by a genuine source unit change.
+    On the very first sync (no marker yet) only the marker is written —
+    new entities consume the suggested unit, and entities that predate the
+    native-kg redesign keep their old display unit via HA core's automatic
+    suggested-unit backfill in add_to_platform_start.
+
+    Note: the entry-data write here is only safe because this integration
+    registers no config-entry update listener (the options flow reloads
+    explicitly). If a listener is ever added, this call — invoked from the
+    source state-change handler and from platform setup — would trigger
+    reloads and must be reworked first.
+    """
+    last_synced = entry.data.get(CONF_LAST_SYNCED_DISPLAY_UNIT)
+    if last_synced == display_unit:
+        return
+
+    if last_synced is not None:
+        registry = er.async_get(hass)
+        for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if (
+                reg_entry.domain != SENSOR_DOMAIN
+                or reg_entry.original_device_class != SensorDeviceClass.WEIGHT
+            ):
+                continue
+            # async_update_entity_options replaces the whole per-domain
+            # options dict, so carry over any other stored sensor options
+            # (e.g. display precision) instead of clobbering them.
+            sensor_options = {
+                **(reg_entry.options.get(SENSOR_DOMAIN) or {}),
+                "unit_of_measurement": display_unit,
+            }
+            registry.async_update_entity_options(
+                reg_entry.entity_id, SENSOR_DOMAIN, sensor_options
+            )
+            _LOGGER.debug(
+                "Updated display unit for %s: %s -> %s",
+                reg_entry.entity_id,
+                last_synced,
+                display_unit,
+            )
+
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_LAST_SYNCED_DISPLAY_UNIT: display_unit}
+    )
 
 
 def _safe_float(value: Any) -> float | None:
@@ -1118,6 +1190,15 @@ class RouterRuntime:
         weight_kg = _convert_to_kg(value, unit)
         if weight_kg is None:
             return
+
+        # The source reported a valid mass unit — keep the entry's weight
+        # entities displaying it. No-op unless the unit actually changed
+        # since the last sync (marker-guarded), so this is cheap per event.
+        # Placed before the unit-change-only skip below: a bare unit flip
+        # must sync the display even though it records no measurement.
+        sync_display_unit_overrides(
+            self.hass, self.entry, _normalize_display_unit(unit)
+        )
 
         old_value = (
             _safe_float(old_state.state) if hasattr(old_state, "state") else None

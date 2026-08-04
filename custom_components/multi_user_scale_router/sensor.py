@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -19,12 +20,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.util.unit_conversion import MassConverter
 
 from .const import DATA_ROUTER, DOMAIN, MAX_EXPOSED_HISTORY_ITEMS, UNIT_SPELLING_ALIASES
+from .coordinator import sync_display_unit_overrides
 
-
-def _weight_to_display(value: float | None) -> float | None:
-    if value is None:
-        return None
-    return round(value, 2)
+_LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_unit(unit: str | None) -> str | None:
@@ -66,6 +64,13 @@ class RouterUserWeightSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_should_poll = False
     _attr_has_entity_name = True
+
+    # Native is always kg — the phase-2 invariant. Display follows the
+    # per-entity registry unit, seeded from the source at first
+    # registration and re-synced by sync_display_unit_overrides() when
+    # the source's unit changes.
+    _attr_native_unit_of_measurement = UnitOfMass.KILOGRAMS
+    _attr_suggested_display_precision = 2
 
     # Never record the history attribute: it's already exposed capped (20
     # entries), but recording an array on every weigh-in just churns
@@ -109,15 +114,11 @@ class RouterUserWeightSensor(SensorEntity):
     @property
     def native_value(self) -> float | None:
         measurement = self._runtime.router.get_user_last_measurement(self._user_id)
-        return _weight_to_display(
-            self._runtime.display_weight_value(measurement.weight_kg)
-            if measurement is not None
-            else None
-        )
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return self._runtime.display_unit
+        if measurement is None:
+            return None
+        # Unrounded on purpose — rounding is presentation, handled by
+        # suggested_display_precision (same principle as _convert_mass_value).
+        return measurement.weight_kg
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -125,7 +126,7 @@ class RouterUserWeightSensor(SensorEntity):
         # Convert to the unit the state itself is rendered in (registry
         # override → suggested → native), so attribute and state can never
         # disagree — a per-entity override to any mass unit is honored.
-        display_unit = self.unit_of_measurement or self._runtime.display_unit
+        display_unit = self.unit_of_measurement
         weight_history = []
         # Oldest→newest; the pending diagnostic is deliberately the
         # opposite (newest→oldest).
@@ -299,11 +300,11 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
             )
 
         if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
-            # Fallback to prevent device_class/unit mismatch warnings on
-            # startup if unit is missing
-            if not getattr(self, "_attr_native_unit_of_measurement", None):
-                self._attr_native_unit_of_measurement = "kg"
-            # Converted values are stored unrounded; keep the UI tidy.
+            # Native is always kg (phase-2 invariant), regardless of the
+            # tracked entity's own unit: _extract_value converts captured
+            # values from their capture-time unit. Display follows the
+            # entry-wide sweep / per-entity overrides.
+            self._attr_native_unit_of_measurement = UnitOfMass.KILOGRAMS
             self._attr_suggested_display_precision = 2
 
         # state_class is not stored in the entity registry, so if the source entity
@@ -339,12 +340,20 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
         value = entity_data.get("state")
         if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
             # The value was captured in the tracked entity's unit *at weigh
-            # time*, while this sensor's native unit was snapshotted at
-            # setup — convert so a unit change on the tracked entity can't
-            # mislabel data.
+            # time*; convert it to this sensor's fixed native kg.
             captured_unit = (entity_data.get("attributes") or {}).get(
                 "unit_of_measurement"
             )
+            if not captured_unit:
+                # Accepted risk: a WEIGHT-class entity virtually always
+                # carries unit_of_measurement, but without one
+                # _convert_mass_value passes the value through unconverted
+                # — surface that so a mislabeled value is visible in logs.
+                _LOGGER.debug(
+                    "Tracked entity %s captured without unit_of_measurement; "
+                    "storing value as-is under kg",
+                    self._source_entity_id,
+                )
             value = _convert_mass_value(
                 value, captured_unit, self.native_unit_of_measurement
             )
@@ -375,10 +384,8 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
                     getattr(self, "_attr_device_class", None)
                     == SensorDeviceClass.WEIGHT
                 ):
-                    # The stored value carries the native unit it was
-                    # recorded under; this sensor's unit is re-snapshotted
-                    # from the source on every setup, so convert across a
-                    # unit change that happened while we were unloaded.
+                    # The stored value carries the unit it was recorded
+                    # under; convert it to this sensor's fixed native kg.
                     restored = _convert_mass_value(
                         restored,
                         last.native_unit_of_measurement,
@@ -447,14 +454,10 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
                 self._attr_native_unit_of_measurement = "%"
         elif "mass" in key_lower or "weight" in key_lower:
             self._attr_device_class = SensorDeviceClass.WEIGHT
-            source_state = runtime.hass.states.get(runtime.source_entity_id)
-            if source_state:
-                self._attr_native_unit_of_measurement = source_state.attributes.get(
-                    "unit_of_measurement", "kg"
-                )
-            else:
-                self._attr_native_unit_of_measurement = "kg"
-            # Converted values are stored unrounded; keep the UI tidy.
+            # Native is always kg (phase-2 invariant); _extract_value
+            # converts captured values from their capture-time unit.
+            # Display follows the entry-wide sweep / per-entity overrides.
+            self._attr_native_unit_of_measurement = UnitOfMass.KILOGRAMS
             self._attr_suggested_display_precision = 2
         elif any(x in key_lower for x in ["fat", "water", "protein"]):
             self._attr_native_unit_of_measurement = "%"
@@ -499,9 +502,8 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
         value = tracked.get(self._attribute_key)
         if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
             # Tracked attributes ride on the weight source's state, so
-            # their values arrive in the source's unit *at capture time*,
-            # while this sensor's native unit was snapshotted at setup —
-            # convert so a source unit change can't mislabel data.
+            # their values arrive in the source's unit *at capture time*;
+            # convert them to this sensor's fixed native kg.
             captured_unit = getattr(measurement, "source_unit", None) or (
                 measurement.raw.get("source_attributed_unit")
             )
@@ -536,10 +538,8 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
                     getattr(self, "_attr_device_class", None)
                     == SensorDeviceClass.WEIGHT
                 ):
-                    # The stored value carries the native unit it was
-                    # recorded under; this sensor's unit is re-snapshotted
-                    # from the source on every setup, so convert across a
-                    # unit change that happened while we were unloaded.
+                    # The stored value carries the unit it was recorded
+                    # under; convert it to this sensor's fixed native kg.
                     restored = _convert_mass_value(
                         restored,
                         last.native_unit_of_measurement,
@@ -601,4 +601,29 @@ async def async_setup_entry(
                 )
             )
 
+    # Presentation seeding (phase 2): every weight-class sensor of the
+    # entry displays the source scale's unit. New entities consume the
+    # suggestion once at first registration; existing entities are covered
+    # by the sweep (unit changed while unloaded) or by HA core's
+    # suggested-unit backfill (pre-redesign entities keep their old unit).
+    display_unit = runtime.display_unit
+    for sensor_entity in entities:
+        if (
+            getattr(sensor_entity, "_attr_device_class", None)
+            == SensorDeviceClass.WEIGHT
+        ):
+            sensor_entity._attr_suggested_unit_of_measurement = display_unit
+
     async_add_entities(entities)
+
+    # Sweep AFTER async_add_entities: the sweep filters on the registry's
+    # original_device_class, which only self-corrects while the add
+    # executes (an eager-start task that runs to completion before this
+    # line under current HA core — if a future core adds a real suspension
+    # point there, this ordering weakens but the hazard self-heals on the
+    # next unit flip). Sweeping before it could write a spurious unit
+    # override onto a legacy entity whose stored device class is stale
+    # (e.g. a body_mass_index sensor misclassified as WEIGHT before the
+    # phase-1 ordering fix). Suggested-unit seeding stays BEFORE the add —
+    # it's consumed at first registration.
+    sync_display_unit_overrides(hass, entry, display_unit)
