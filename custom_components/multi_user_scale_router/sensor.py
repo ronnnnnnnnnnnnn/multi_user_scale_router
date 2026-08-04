@@ -11,18 +11,52 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfMass
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util.unit_conversion import MassConverter
 
-from .const import DATA_ROUTER, DOMAIN, MAX_EXPOSED_HISTORY_ITEMS
+from .const import DATA_ROUTER, DOMAIN, MAX_EXPOSED_HISTORY_ITEMS, UNIT_SPELLING_ALIASES
 
 
 def _weight_to_display(value: float | None) -> float | None:
     if value is None:
         return None
     return round(value, 2)
+
+
+def _normalize_unit(unit: str | None) -> str | None:
+    if unit is None:
+        return None
+    normalized = unit.lower().strip()
+    return UNIT_SPELLING_ALIASES.get(normalized, normalized)
+
+
+def _convert_mass_value(value: Any, from_unit: str | None, to_unit: str | None) -> Any:
+    """Convert a captured mass value between units when possible.
+
+    Returns the value unchanged when the units are missing, equal, or not
+    valid mass units, or when the value isn't numeric — mirroring the
+    plain pass-through behavior for everything we can't safely convert.
+    """
+    norm_from = _normalize_unit(from_unit)
+    norm_to = _normalize_unit(to_unit)
+    if norm_from is None or norm_to is None or norm_from == norm_to:
+        return value
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return value
+    if (
+        norm_from not in MassConverter.VALID_UNITS
+        or norm_to not in MassConverter.VALID_UNITS
+    ):
+        return value
+    # Unrounded on purpose — rounding is presentation, handled by
+    # suggested_display_precision on the sensors.
+    return MassConverter.convert(numeric, norm_from, norm_to)
 
 
 class RouterUserWeightSensor(SensorEntity):
@@ -32,6 +66,13 @@ class RouterUserWeightSensor(SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_should_poll = False
     _attr_has_entity_name = True
+
+    # Never record the history attribute: it's already exposed capped (20
+    # entries), but recording an array on every weigh-in just churns
+    # database rows — and past the recorder's 16 KB attribute limit
+    # (MAX_STATE_ATTRS_BYTES) the recorder would store {} for ALL of the
+    # state's attributes.
+    _unrecorded_attributes = frozenset({"weight_history"})
 
     def __init__(self, runtime: Any, user_id: str, display_name: str) -> None:
         self._runtime = runtime
@@ -81,17 +122,21 @@ class RouterUserWeightSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         history = self._runtime.router.get_user_history(self._user_id)
-        display_unit = self._runtime.display_unit
-        is_pounds = display_unit == "lb"
+        # Convert to the unit the state itself is rendered in (registry
+        # override → suggested → native), so attribute and state can never
+        # disagree — a per-entity override to any mass unit is honored.
+        display_unit = self.unit_of_measurement or self._runtime.display_unit
         weight_history = []
+        # Oldest→newest; the pending diagnostic is deliberately the
+        # opposite (newest→oldest).
         for measurement in history[-MAX_EXPOSED_HISTORY_ITEMS:]:
             display_measurement = {
                 "measurement_id": measurement.measurement_id,
                 "timestamp": measurement.timestamp.isoformat(),
                 "weight": round(
-                    self._runtime.display_weight_value(measurement.weight_kg)
-                    if is_pounds
-                    else measurement.weight_kg,
+                    MassConverter.convert(
+                        measurement.weight_kg, UnitOfMass.KILOGRAMS, display_unit
+                    ),
                     2,
                 ),
                 "weight_unit": display_unit,
@@ -120,6 +165,10 @@ class RouterPendingSensor(SensorEntity):
     _attr_name = "Pending Measurements"
     _attr_icon = "mdi:clipboard-list"
 
+    # A diagnostic work-queue with no history value — keep it out of the
+    # recorder entirely.
+    _unrecorded_attributes = frozenset({"pending"})
+
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
         self._attr_unique_id = f"{runtime.entry_id}_pending_count"
@@ -144,15 +193,16 @@ class RouterPendingSensor(SensorEntity):
                 "weight": round(
                     self._runtime.display_weight_value(
                         pending_item.measurement.weight_kg
-                    )
-                    if self._runtime.display_unit == "lb"
-                    else pending_item.measurement.weight_kg,
+                    ),
                     2,
                 ),
                 "weight_unit": self._runtime.display_unit,
             }
             for pending_item in self._runtime.pending_measurements
         ]
+        # Newest→oldest — deliberately opposite to `weight_history`
+        # (oldest→newest): pending entries are a work-queue where the most
+        # recent unattributed weigh-in is the one being acted on.
         pending.sort(key=lambda x: x["timestamp"], reverse=True)
         return {
             "pending": pending,
@@ -170,6 +220,9 @@ class RouterUsersSensor(SensorEntity):
     _attr_has_entity_name = True
     _attr_name = "User Directory"
     _attr_icon = "mdi:account-multiple"
+
+    # Bounded, but a pure listing — recording it just churns database rows.
+    _unrecorded_attributes = frozenset({"users"})
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
@@ -245,13 +298,13 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
                 "icon", getattr(self, "_attr_icon", None)
             )
 
-        # Fallback to prevent device_class/unit mismatch warnings on startup if unit is missing
-        if getattr(
-            self, "_attr_device_class", None
-        ) == SensorDeviceClass.WEIGHT and not getattr(
-            self, "_attr_native_unit_of_measurement", None
-        ):
-            self._attr_native_unit_of_measurement = "kg"
+        if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
+            # Fallback to prevent device_class/unit mismatch warnings on
+            # startup if unit is missing
+            if not getattr(self, "_attr_native_unit_of_measurement", None):
+                self._attr_native_unit_of_measurement = "kg"
+            # Converted values are stored unrounded; keep the UI tidy.
+            self._attr_suggested_display_precision = 2
 
         # state_class is not stored in the entity registry, so if the source entity
         # hasn't loaded yet we'd lose it. Tracked entities from a scale are always numeric
@@ -283,7 +336,19 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
         entity_data = tracked.get(self._source_entity_id)
         if not entity_data or not isinstance(entity_data, dict):
             return None
-        return entity_data.get("state")
+        value = entity_data.get("state")
+        if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
+            # The value was captured in the tracked entity's unit *at weigh
+            # time*, while this sensor's native unit was snapshotted at
+            # setup — convert so a unit change on the tracked entity can't
+            # mislabel data.
+            captured_unit = (entity_data.get("attributes") or {}).get(
+                "unit_of_measurement"
+            )
+            value = _convert_mass_value(
+                value, captured_unit, self.native_unit_of_measurement
+            )
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -305,7 +370,21 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
         else:
             last = await self.async_get_last_sensor_data()
             if last is not None and last.native_value is not None:
-                self._attr_native_value = last.native_value
+                restored = last.native_value
+                if (
+                    getattr(self, "_attr_device_class", None)
+                    == SensorDeviceClass.WEIGHT
+                ):
+                    # The stored value carries the native unit it was
+                    # recorded under; this sensor's unit is re-snapshotted
+                    # from the source on every setup, so convert across a
+                    # unit change that happened while we were unloaded.
+                    restored = _convert_mass_value(
+                        restored,
+                        last.native_unit_of_measurement,
+                        self.native_unit_of_measurement,
+                    )
+                self._attr_native_value = restored
             if measurement is not None:
                 self._last_seen_id = measurement.measurement_id
         self._runtime.add_listener(self._handle_runtime_update)
@@ -359,6 +438,13 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
         # Determine unit and device class from key name.
         if "impedance" in key_lower or "resistance" in key_lower:
             self._attr_native_unit_of_measurement = "Ω"
+        elif "percent" in key_lower or "bmi" in key_lower or "index" in key_lower:
+            # Checked BEFORE the mass/weight branch: muscle_mass_percentage
+            # and body_mass_index contain "mass" and would otherwise get
+            # WEIGHT device class — and be wrongly mass-unit-converted on a
+            # source unit change. Indices (BMI) stay dimensionless.
+            if "percent" in key_lower:
+                self._attr_native_unit_of_measurement = "%"
         elif "mass" in key_lower or "weight" in key_lower:
             self._attr_device_class = SensorDeviceClass.WEIGHT
             source_state = runtime.hass.states.get(runtime.source_entity_id)
@@ -368,9 +454,9 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
                 )
             else:
                 self._attr_native_unit_of_measurement = "kg"
-        elif any(
-            x in key_lower for x in ["percent", "percentage", "fat", "water", "protein"]
-        ):
+            # Converted values are stored unrounded; keep the UI tidy.
+            self._attr_suggested_display_precision = 2
+        elif any(x in key_lower for x in ["fat", "water", "protein"]):
             self._attr_native_unit_of_measurement = "%"
         elif "metabolic" in key_lower or "bmr" in key_lower:
             self._attr_native_unit_of_measurement = "kcal"
@@ -410,7 +496,19 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
         tracked = measurement.raw.get("tracked_attributes")
         if not tracked or not isinstance(tracked, dict):
             return None
-        return tracked.get(self._attribute_key)
+        value = tracked.get(self._attribute_key)
+        if getattr(self, "_attr_device_class", None) == SensorDeviceClass.WEIGHT:
+            # Tracked attributes ride on the weight source's state, so
+            # their values arrive in the source's unit *at capture time*,
+            # while this sensor's native unit was snapshotted at setup —
+            # convert so a source unit change can't mislabel data.
+            captured_unit = getattr(measurement, "source_unit", None) or (
+                measurement.raw.get("source_attributed_unit")
+            )
+            value = _convert_mass_value(
+                value, captured_unit, self.native_unit_of_measurement
+            )
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -433,7 +531,21 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
         else:
             last = await self.async_get_last_sensor_data()
             if last is not None and last.native_value is not None:
-                self._attr_native_value = last.native_value
+                restored = last.native_value
+                if (
+                    getattr(self, "_attr_device_class", None)
+                    == SensorDeviceClass.WEIGHT
+                ):
+                    # The stored value carries the native unit it was
+                    # recorded under; this sensor's unit is re-snapshotted
+                    # from the source on every setup, so convert across a
+                    # unit change that happened while we were unloaded.
+                    restored = _convert_mass_value(
+                        restored,
+                        last.native_unit_of_measurement,
+                        self.native_unit_of_measurement,
+                    )
+                self._attr_native_value = restored
             if measurement is not None:
                 self._last_seen_id = measurement.measurement_id
         self._runtime.add_listener(self._handle_runtime_update)

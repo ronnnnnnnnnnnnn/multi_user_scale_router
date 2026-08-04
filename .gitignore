@@ -9,6 +9,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 tests/
+pytest.ini
 
 # Lint/type-check caches
 .ruff_cache/

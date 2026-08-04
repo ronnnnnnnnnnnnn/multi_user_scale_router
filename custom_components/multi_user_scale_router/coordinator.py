@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from urllib.parse import quote
 from typing import Any
 
@@ -37,6 +38,7 @@ from .const import (
     DEFAULT_SETTLING_DELAY,
     DEFAULT_BACK_MARGIN,
     SYSTEM_ATTRIBUTES,
+    UNIT_SPELLING_ALIASES,
 )
 from multi_user_scale_core import (
     MeasurementCandidate,
@@ -128,20 +130,43 @@ def _safe_user_config_by_id(raw_users: Any) -> dict[str, dict[str, Any]]:
     return config_by_id
 
 
+@lru_cache(maxsize=32)
+def _warn_unsupported_unit(unit: str | None) -> None:
+    """Warn about an unsupported source unit, once per distinct unit.
+
+    Deduplicated so a misconfigured source doesn't flood the log on every
+    state change; the cache bound keeps a source emitting ever-changing
+    garbage units from growing memory (eviction just means a long-gone
+    unit may warn again).
+    """
+    _LOGGER.warning(
+        "Ignoring source measurements with unsupported mass unit %r; "
+        "supported units: %s",
+        unit,
+        sorted(MassConverter.VALID_UNITS),
+    )
+
+
 def _convert_to_kg(value: float, unit: str) -> float | None:
+    """Convert a source reading to kg, accepting any HA mass unit.
+
+    HA's entity-settings dialog offers every mass unit for a WEIGHT-class
+    source entity (st, g, oz, ...), so restricting ingestion to kg/lb would
+    silently drop all measurements from an overridden source. Unknown units
+    still return None — but loudly, via a once-per-unit warning.
+    """
     normalized = (unit or "").lower().strip()
-    if normalized in {"kg", "kilogram", "kilograms"}:
-        return value
-    if normalized in {"lb", "lbs", "pound", "pounds"}:
-        return value * 0.45359237
+    normalized = UNIT_SPELLING_ALIASES.get(normalized, normalized)
+    if normalized in MassConverter.VALID_UNITS:
+        return MassConverter.convert(value, normalized, UnitOfMass.KILOGRAMS)
+    _warn_unsupported_unit(unit)
     return None
 
 
 def _normalize_display_unit(unit: str | None) -> str:
     normalized = (unit or "").lower().strip()
-    if normalized in {"lb", "lbs", "pound", "pounds"}:
-        return "lb"
-    return "kg"
+    normalized = UNIT_SPELLING_ALIASES.get(normalized, normalized)
+    return "lb" if normalized == "lb" else "kg"
 
 
 def _convert_from_kg(value_kg: float, display_unit: str) -> float:

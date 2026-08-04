@@ -59,3 +59,12 @@ DEFAULT_SETTLING_DELAY = 3.0
 DEFAULT_BACK_MARGIN = 2.0
 MAX_PENDING_MEASUREMENTS = 10
 MAX_EXPOSED_HISTORY_ITEMS = 20
+
+# Unit spellings some sources or attributes emit that MassConverter doesn't accept verbatim.
+UNIT_SPELLING_ALIASES = {
+    "kilogram": "kg",
+    "kilograms": "kg",
+    "lbs": "lb",
+    "pound": "lb",
+    "pounds": "lb",
+}
