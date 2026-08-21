@@ -44,3 +44,6 @@ env/
 
 # Claude Code session state
 .claude/
+
+# Claude Code guidance (local-only by repo convention)
+CLAUDE.md
