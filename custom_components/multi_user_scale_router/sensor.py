@@ -376,7 +376,12 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
             self._attr_native_value = value
             self._last_seen_id = measurement.measurement_id
             self._value_measurement_id = measurement.measurement_id
-        else:
+        elif measurement is not None:
+            # The newest weigh-in lacks this field: keep the last known value.
+            # Never restore for a user with no history at all — HA's restore
+            # cache is keyed by entity_id and outlives the entity, and user
+            # IDs are name slugs, so a user removed and re-added under the
+            # same name would otherwise get the old user's value back.
             last = await self.async_get_last_sensor_data()
             if last is not None and last.native_value is not None:
                 restored = last.native_value
@@ -392,8 +397,7 @@ class RouterUserTrackedEntitySensor(RestoreSensor):
                         self.native_unit_of_measurement,
                     )
                 self._attr_native_value = restored
-            if measurement is not None:
-                self._last_seen_id = measurement.measurement_id
+            self._last_seen_id = measurement.measurement_id
         self._runtime.add_listener(self._handle_runtime_update)
 
     @callback
@@ -530,7 +534,12 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
             self._attr_native_value = value
             self._last_seen_id = measurement.measurement_id
             self._value_measurement_id = measurement.measurement_id
-        else:
+        elif measurement is not None:
+            # The newest weigh-in lacks this field: keep the last known value.
+            # Never restore for a user with no history at all — HA's restore
+            # cache is keyed by entity_id and outlives the entity, and user
+            # IDs are name slugs, so a user removed and re-added under the
+            # same name would otherwise get the old user's value back.
             last = await self.async_get_last_sensor_data()
             if last is not None and last.native_value is not None:
                 restored = last.native_value
@@ -546,8 +555,7 @@ class RouterUserTrackedAttributeSensor(RestoreSensor):
                         self.native_unit_of_measurement,
                     )
                 self._attr_native_value = restored
-            if measurement is not None:
-                self._last_seen_id = measurement.measurement_id
+            self._last_seen_id = measurement.measurement_id
         self._runtime.add_listener(self._handle_runtime_update)
 
     @callback
