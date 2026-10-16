@@ -441,7 +441,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
 
             measurement_id = item.get(CONF_MEASUREMENT_ID)
-            if measurement_id is None:
+            if not measurement_id:
+                # An empty ID would be replaced with a random UUID on
+                # restore, breaking replay idempotency; treat it as omitted
+                # so replays generate the same deterministic ID.
                 measurement_id = (
                     f"import_{user_id}_{item['timestamp']}_{item['weight_kg']}".replace(
                         ":", ""
@@ -461,13 +464,16 @@ def _register_services(hass: HomeAssistant) -> None:
         measurements.sort(key=lambda measurement: measurement.timestamp)
         for measurement in measurements:
             try:
-                runtime.record_measurement_for_user(user_id, measurement)
+                runtime.router.record_measurement_for_user(user_id, measurement)
                 imported += 1
             except DuplicateMeasurementError:
                 skipped_duplicates += 1
                 continue
             except Exception as error:
                 raise HomeAssistantError(str(error)) from error
+        # Persist once: per-item persistence re-serializes the whole growing
+        # history and turns large imports quadratic.
+        runtime.persist_router_state()
 
         runtime._notify()
         runtime._notify_diagnostic_sensors()
